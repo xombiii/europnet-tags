@@ -1,0 +1,62 @@
+{
+  "manifest_version": 3,
+  "name": "EuropNet — Tags de fiabilité",
+  "version": "1.0.0",
+  "description": "Ajoute un indicateur de fiabilité (vert / jaune / rouge) à côté des pseudos du tchat EuropNet : liste des membres, salon de discussion, messages privés et recherche.",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "europnet-tags@xombi",
+      "strict_min_version": "115.0"
+    }
+  },
+  "permissions": [
+    "storage",
+    "scripting"
+  ],
+  "host_permissions": [
+    "*://*.europnet.org/*",
+    "*://europnet.org/*"
+  ],
+  "optional_host_permissions": [
+    "*://*/*"
+  ],
+  "background": {
+    "scripts": [
+      "src/common/store.js",
+      "src/background/background.js"
+    ]
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.europnet.org/*",
+        "*://europnet.org/*"
+      ],
+      "js": [
+        "src/common/store.js",
+        "src/content/content.js"
+      ],
+      "css": [
+        "src/content/content.css"
+      ],
+      "run_at": "document_idle",
+      "all_frames": true
+    }
+  ],
+  "action": {
+    "default_title": "EuropNet — Tags de fiabilité",
+    "default_popup": "src/popup/popup.html",
+    "default_icon": {
+      "48": "icons/icon.svg",
+      "96": "icons/icon.svg"
+    }
+  },
+  "options_ui": {
+    "page": "src/options/options.html",
+    "open_in_tab": true
+  },
+  "icons": {
+    "48": "icons/icon.svg",
+    "96": "icons/icon.svg"
+  }
+}

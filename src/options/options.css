@@ -1,0 +1,85 @@
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 24px 16px 48px;
+  background: #f8fafc;
+  color: #0f172a;
+  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+main { max-width: 720px; margin: 0 auto; }
+
+h1 { margin: 0 0 20px; font-size: 20px; }
+h2 { margin: 0 0 10px; font-size: 15px; }
+
+section {
+  margin-bottom: 18px;
+  padding: 16px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+}
+
+.hint { margin: 0 0 10px; color: #475569; font-size: 13px; }
+
+.check { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; cursor: pointer; }
+.range { display: block; margin-top: 12px; }
+.range input { display: block; width: 220px; margin-top: 6px; }
+
+.field { display: block; }
+.field textarea {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  padding: 8px;
+  font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  resize: vertical;
+}
+
+input[type="text"], button, textarea {
+  font-family: inherit;
+  color: inherit;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #fff;
+  padding: 7px 10px;
+}
+
+button { cursor: pointer; font-size: 13px; }
+button:hover { background: #f1f5f9; }
+button.danger { color: #b91c1c; border-color: #fecaca; }
+button.danger:hover { background: #fef2f2; }
+
+.inline { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.inline input[type="text"] { flex: 1; min-width: 220px; }
+
+details { margin-top: 12px; }
+summary { cursor: pointer; font-size: 13px; color: #475569; }
+
+.defaults { margin-top: 8px; display: grid; gap: 4px; }
+.defaults label {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: #334155;
+}
+
+.hosts { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 6px; }
+.hosts li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: #f1f5f9;
+  border-radius: 8px;
+  font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.error { margin: 6px 0 0; color: #b91c1c; font-size: 13px; }
+.status { min-height: 20px; color: #2563eb; font-size: 13px; }
+code { background: #f1f5f9; padding: 1px 5px; border-radius: 4px; }

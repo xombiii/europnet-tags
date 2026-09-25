@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <title>EuropNet — Tags de fiabilité : options</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+<main>
+  <h1>EuropNet — Tags de fiabilité</h1>
+
+  <section>
+    <h2>Affichage des pastilles</h2>
+    <label class="check"><input type="checkbox" id="showInMessages"> Dans les messages du salon</label>
+    <label class="check"><input type="checkbox" id="showInNicklist"> Dans la liste des membres (et la recherche)</label>
+    <label class="check"><input type="checkbox" id="showInSidebar"> Dans la barre latérale (messages privés)</label>
+    <label class="check"><input type="checkbox" id="showNoteTooltip"> Afficher la note dans l'infobulle</label>
+    <label class="check"><input type="checkbox" id="contextMenuEnabled"> Ouvrir le menu de tag au clic droit sur un pseudo</label>
+    <label class="range">
+      Taille de la pastille : <b id="badgeSizeValue">10</b> px
+      <input type="range" id="badgeSize" min="6" max="18" step="1">
+    </label>
+  </section>
+
+  <section>
+    <h2>Détection des pseudos</h2>
+    <p class="hint">
+      L'extension reconnaît les pseudos grâce à des sélecteurs CSS. Si aucune pastille
+      n'apparaît, ouvre le tchat, clique sur <b>Pipette</b> dans le popup de l'extension
+      puis clique sur un pseudo : le sélecteur correspondant sera ajouté ici.
+    </p>
+    <label class="field">
+      Sélecteurs personnalisés (un par ligne)
+      <textarea id="customSelectors" rows="5" spellcheck="false" placeholder="span.kiwi-messagelist-nick"></textarea>
+    </label>
+    <p class="error" id="selector-error" hidden></p>
+    <details>
+      <summary>Sélecteurs fournis par défaut</summary>
+      <div id="default-selectors" class="defaults"></div>
+    </details>
+  </section>
+
+  <section>
+    <h2>Domaines supplémentaires</h2>
+    <p class="hint">
+      L'extension est active sur <code>europnet.org</code>. Si le tchat est servi
+      depuis une autre adresse, autorise-la ici.
+    </p>
+    <form class="inline" id="host-form">
+      <input type="text" id="host-input" placeholder="*://*.exemple.org/*" spellcheck="false">
+      <button type="submit">Autoriser</button>
+    </form>
+    <ul class="hosts" id="hosts"></ul>
+  </section>
+
+  <section>
+    <h2>Données</h2>
+    <p class="hint"><b id="tag-count">0</b> pseudo(s) tagué(s), stockés localement dans Firefox.</p>
+    <div class="inline">
+      <button type="button" id="export">Exporter en JSON</button>
+      <button type="button" id="import">Importer (fusion)</button>
+      <button type="button" id="import-replace">Importer (remplacer)</button>
+      <button type="button" class="danger" id="wipe">Tout effacer</button>
+      <input type="file" id="import-file" accept="application/json,.json" hidden>
+    </div>
+  </section>
+
+  <p class="status" id="status" role="status"></p>
+</main>
+
+<script src="../common/store.js"></script>
+<script src="options.js"></script>
+</body>
+</html>

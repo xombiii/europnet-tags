@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <title>Fixture — tchat type EuropNet</title>
+  <style>
+    body { margin: 0; display: flex; height: 100vh; font: 14px system-ui, sans-serif; }
+    .kiwi-statebrowser { width: 220px; background: #0f2c52; color: #dbeafe; padding: 12px; }
+    .kiwi-statebrowser h3 { font-size: 11px; text-transform: uppercase; opacity: .7; }
+    .kiwi-statebrowser-channel { padding: 4px 0; }
+    .kiwi-messagelist { flex: 1; padding: 12px; overflow: auto; }
+    .kiwi-messagelist-message { margin-bottom: 8px; }
+    .kiwi-messagelist-nick { font-weight: 600; color: #2563eb; }
+    .kiwi-nicklist { width: 240px; background: #0f2c52; color: #dbeafe; padding: 12px; overflow: auto; }
+    .kiwi-nicklist-user { padding: 3px 0; display: flex; align-items: center; gap: 4px; }
+  </style>
+</head>
+<body>
+  <nav class="kiwi-statebrowser">
+    <h3>Salons</h3>
+    <div class="kiwi-statebrowser-channel"><span class="kiwi-statebrowser-channel-name">#BDSM</span></div>
+    <h3>Messages</h3>
+    <div class="kiwi-statebrowser-channel"><span class="kiwi-statebrowser-channel-name">Althanea</span></div>
+    <div class="kiwi-statebrowser-channel"><span class="kiwi-statebrowser-channel-name">cassandre0075</span></div>
+    <div class="kiwi-statebrowser-channel"><span class="kiwi-statebrowser-channel-name">Prin_Cesse</span></div>
+  </nav>
+
+  <main class="kiwi-messagelist" id="messages">
+    <div class="kiwi-messagelist-message">
+      <span class="kiwi-messagelist-nick">Bigbi <i class="gender">♂</i></span>
+      <span class="kiwi-messagelist-time">22:41:03</span>
+      <div class="kiwi-messagelist-body">Bonsoir</div>
+    </div>
+    <div class="kiwi-messagelist-message">
+      <span class="kiwi-messagelist-nick">cassandre0075 <i class="gender">♀</i></span>
+      <span class="kiwi-messagelist-time">22:41:55</span>
+      <div class="kiwi-messagelist-body">Comment allez-vous ?</div>
+    </div>
+  </main>
+
+  <aside class="kiwi-nicklist" id="nicklist">
+    <div class="kiwi-nicklist-user"><span class="kiwi-nicklist-user-nick">@Maitresse</span></div>
+    <div class="kiwi-nicklist-user"><span class="kiwi-nicklist-user-nick">%Althanea</span><i class="gender">♀</i></div>
+    <div class="kiwi-nicklist-user"><span class="kiwi-nicklist-user-nick">_laura</span><i class="gender">♀</i></div>
+    <div class="kiwi-nicklist-user"><span class="kiwi-nicklist-user-nick">__TravSoum_75-44</span><i class="gender">⚧</i></div>
+    <div class="kiwi-nicklist-user"><span class="kiwi-nicklist-user-nick">coeur_de_dragon</span><i class="gender">♂</i></div>
+  </aside>
+</body>
+</html>

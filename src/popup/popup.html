@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <title>EuropNet — Tags de fiabilité</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header class="head">
+    <h1>Tags de fiabilité</h1>
+    <div class="counts">
+      <span class="count count--green"><i></i><b id="count-green">0</b></span>
+      <span class="count count--yellow"><i></i><b id="count-yellow">0</b></span>
+      <span class="count count--red"><i></i><b id="count-red">0</b></span>
+    </div>
+  </header>
+
+  <form class="add" id="add-form" autocomplete="off">
+    <input type="text" id="add-nick" placeholder="Ajouter un pseudo…" maxlength="32" required>
+    <select id="add-tag">
+      <option value="green">Fiable</option>
+      <option value="yellow">Prudence</option>
+      <option value="red">À éviter</option>
+    </select>
+    <button type="submit">Ajouter</button>
+  </form>
+
+  <div class="filters">
+    <input type="search" id="search" placeholder="Rechercher un pseudo ou une note…">
+    <div class="chips" id="chips">
+      <button type="button" class="chip is-active" data-filter="all">Tous</button>
+      <button type="button" class="chip chip--green" data-filter="green">Fiable</button>
+      <button type="button" class="chip chip--yellow" data-filter="yellow">Prudence</button>
+      <button type="button" class="chip chip--red" data-filter="red">À éviter</button>
+    </div>
+  </div>
+
+  <ul class="list" id="list"></ul>
+  <p class="empty" id="empty" hidden>Aucun pseudo tagué pour l'instant.<br>Clic droit sur un pseudo dans le tchat pour en ajouter un.</p>
+
+  <footer class="foot">
+    <button type="button" id="pick">Pipette</button>
+    <button type="button" id="export">Exporter</button>
+    <button type="button" id="import">Importer</button>
+    <button type="button" id="options">Options</button>
+    <input type="file" id="import-file" accept="application/json,.json" hidden>
+  </footer>
+  <p class="status" id="status" role="status"></p>
+
+  <script src="../common/store.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>
