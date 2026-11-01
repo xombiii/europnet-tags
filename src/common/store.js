@@ -48,6 +48,7 @@
     showInMessages: true,
     showInNicklist: true,
     showInSidebar: true,
+    showWhisperFlag: true,
     badgeSize: 10,
     showNoteTooltip: true,
     contextMenuEnabled: true,

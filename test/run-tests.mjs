@@ -140,6 +140,64 @@ await page.waitForTimeout(250);
 check('nouveau message tagué automatiquement',
   (await zone('#messages', '.entag-badge--red')) === 1);
 
+/* 4b. Flag « whisp » : conversation privée à gauche → flag dans la liste de droite */
+const whisperFlags = () => page.evaluate(() =>
+  Array.from(document.querySelectorAll('.entag-whisper')).map((el) => ({
+    nick: el.dataset.entagWhisperFor,
+    zone: el.closest('#nicklist') ? 'nicklist'
+      : el.closest('.kiwi-statebrowser') ? 'sidebar'
+      : el.closest('#messages') ? 'messages' : 'other'
+  })));
+
+let flags = await whisperFlags();
+check('flag whisp sur %Althanea (conversation privée ouverte) dans la liste des membres',
+  flags.some((f) => f.nick === 'Althanea' && f.zone === 'nicklist'), flags);
+check('un seul flag whisp au départ (ni à gauche, ni dans le salon)', flags.length === 1, flags);
+
+/* Ouverture d'une conversation privée avec _laura (déjà taguée en rouge). */
+await page.evaluate(() => {
+  const row = document.createElement('div');
+  row.className = 'kiwi-statebrowser-channel';
+  row.innerHTML = '<span class="kiwi-statebrowser-channel-name">_laura</span>';
+  document.querySelector('.kiwi-statebrowser').appendChild(row);
+});
+await page.waitForTimeout(400);
+flags = await whisperFlags();
+check('flag whisp ajouté sur _laura dès l\'ouverture de la conversation',
+  flags.some((f) => f.nick === '_laura' && f.zone === 'nicklist'), flags);
+check('aucun flag whisp dans la barre de gauche ni dans le salon',
+  flags.every((f) => f.zone === 'nicklist'), flags);
+
+const order = await page.evaluate(() => {
+  const nick = Array.from(document.querySelectorAll('#nicklist .kiwi-nicklist-user-nick'))
+    .find((el) => el.dataset.entagNick === '_laura');
+  const kids = Array.from(nick.children).map((c) => c.className.split(' ')[0]);
+  return kids;
+});
+check('ordre à la fin du pseudo : pastille puis flag whisp',
+  order.join(',') === 'entag-badge,entag-whisper', order);
+
+/* Fermeture de la conversation privée. */
+await page.evaluate(() => {
+  const names = Array.from(document.querySelectorAll('.kiwi-statebrowser-channel-name'));
+  const row = names.find((el) => el.textContent.trim() === '_laura').closest('.kiwi-statebrowser-channel');
+  row.remove();
+});
+await page.waitForTimeout(400);
+flags = await whisperFlags();
+check('flag whisp retiré à la fermeture de la conversation',
+  !flags.some((f) => f.nick === '_laura') && flags.length === 1, flags);
+check('la pastille de _laura reste en place',
+  (await zone('#nicklist', '.entag-badge--red')) === 1);
+
+/* Réglage : flag désactivable. */
+await page.evaluate(() => browser.storage.local.set({ settings: { showWhisperFlag: false } }));
+await page.waitForTimeout(300);
+check('flag whisp masqué quand le réglage est coupé', (await whisperFlags()).length === 0);
+await page.evaluate(() => browser.storage.local.set({ settings: {} }));
+await page.waitForTimeout(300);
+check('flag whisp de retour quand le réglage est réactivé', (await whisperFlags()).length === 1);
+
 /* 5. Menu au clic droit ---------------------------------------------------- */
 await page.locator('#nicklist .kiwi-nicklist-user-nick', { hasText: 'coeur_de_dragon' }).click({ button: 'right' });
 await page.waitForTimeout(120);

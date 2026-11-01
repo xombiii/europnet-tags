@@ -24,6 +24,39 @@
 .entag-badge--yellow { background: #f59e0b !important; }
 .entag-badge--red    { background: #ef4444 !important; }
 
+/* Flag « whisp » : petite bulle bleue = conversation privée ouverte. */
+.entag-whisper {
+  position: relative !important;
+  display: inline-block !important;
+  box-sizing: content-box !important;
+  width: 12px !important;
+  height: 8px !important;
+  min-width: 12px !important;
+  margin: 0 0 0 5px !important;
+  padding: 0 !important;
+  border-radius: 3px !important;
+  background: #3b82f6 !important;
+  border: 1px solid rgba(0, 0, 0, .35) !important;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, .55) !important;
+  vertical-align: middle !important;
+  flex: none !important;
+  font-size: 0 !important;
+  line-height: 0 !important;
+  text-indent: -9999px !important;
+  overflow: visible !important;
+}
+
+.entag-whisper::after {
+  content: "" !important;
+  position: absolute !important;
+  left: 2px !important;
+  top: 100% !important;
+  margin-top: 1px !important;
+  border-style: solid !important;
+  border-width: 4px 3px 0 3px !important;
+  border-color: #3b82f6 transparent transparent transparent !important;
+}
+
 /* ------------------------------------------------------------------ */
 /* Menu du clic droit                                                  */
 /* ------------------------------------------------------------------ */

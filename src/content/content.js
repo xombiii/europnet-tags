@@ -5,7 +5,10 @@
  *    barre latérale des messages privés, résultats de recherche) ;
  * 2. colle une pastille verte / jaune / rouge à la fin de chaque pseudo tagué ;
  * 3. ouvre un menu au clic droit sur un pseudo pour poser / retirer un tag ;
- * 4. propose un mode « pipette » pour apprendre un sélecteur si le site change.
+ * 4. propose un mode « pipette » pour apprendre un sélecteur si le site change ;
+ * 5. pose un flag « whisp » (bulle bleue) dans la liste des membres sur les
+ *    pseudos avec qui une conversation privée est ouverte dans la barre de
+ *    gauche (rubrique MESSAGES).
  */
 (function () {
   'use strict';
@@ -13,7 +16,10 @@
   const S = globalThis.ENTag;
   const api = S.api;
 
-  const OWN_CLASSES = '.entag-badge, .entag-menu, .entag-toast';
+  const OWN_CLASSES = '.entag-badge, .entag-whisper, .entag-menu, .entag-toast';
+  /* Barre de gauche (salons + messages privés) : source des conversations
+     privées ouvertes. */
+  const STATE_SCOPE = '[class*="statebrowser" i], [class*="channellist" i]';
   const NICK_RE = /^[A-Za-z0-9_\-\[\]{}\\^`|.]{2,32}$/;
   const MODE_PREFIX_RE = /^[@%+~&!]+/;
   /* Symboles de genre / variantes emoji collés au pseudo dans EuropNet. */
@@ -25,6 +31,7 @@
   let observer = null;
   let scanScheduled = false;
   let pickMode = false;
+  let whisperNicks = new Set();
 
   /* ------------------------------------------------------------------ */
   /* Sélecteurs                                                          */
@@ -124,12 +131,36 @@
 
   const VOID_TAGS = new Set(['INPUT', 'IMG', 'BR', 'HR', 'TEXTAREA', 'SELECT']);
 
-  function existingBadge(el) {
+  function existingOwn(el, cls) {
     if (VOID_TAGS.has(el.tagName)) {
-      const next = el.nextElementSibling;
-      return next && next.classList.contains('entag-badge') ? next : null;
+      for (let n = el.nextElementSibling; n && isOurNode(n); n = n.nextElementSibling) {
+        if (n.classList.contains(cls)) return n;
+      }
+      return null;
     }
-    return el.querySelector(':scope > .entag-badge');
+    return el.querySelector(':scope > .' + cls);
+  }
+
+  function existingBadge(el) {
+    return existingOwn(el, 'entag-badge');
+  }
+
+  function existingFlag(el) {
+    return existingOwn(el, 'entag-whisper');
+  }
+
+  /* Ordre fixe à la fin du pseudo : pastille de fiabilité, puis flag whisp. */
+  function attachBadge(el, node) {
+    const flag = existingFlag(el);
+    if (VOID_TAGS.has(el.tagName)) el.insertAdjacentElement('afterend', node);
+    else if (flag) el.insertBefore(node, flag);
+    else el.appendChild(node);
+  }
+
+  function attachFlag(el, node) {
+    const badge = existingBadge(el);
+    if (VOID_TAGS.has(el.tagName)) (badge || el).insertAdjacentElement('afterend', node);
+    else el.appendChild(node);
   }
 
   function tooltipFor(entry) {
@@ -139,31 +170,7 @@
     return text;
   }
 
-  function decorate(el) {
-    if (!el || !el.isConnected) return;
-    if (el.closest(OWN_CLASSES)) return;
-    if (looksLikeChannel(el)) return;
-
-    /* Un conteneur (ex. .kiwi-nicklist-user) peut matcher en même temps que le
-       pseudo qu'il contient : seul l'élément le plus interne est décoré. */
-    if (selector && el.querySelector(selector)) {
-      const stale = existingBadge(el);
-      if (stale) stale.remove();
-      return;
-    }
-
-    const nick = extractNick(el);
-    const badge = existingBadge(el);
-
-    if (!isValidNick(nick)) {
-      if (badge) badge.remove();
-      return;
-    }
-
-    el.dataset.entagNick = nick;
-    el.classList.add('entag-nick');
-
-    const zone = zoneOf(el);
+  function syncBadge(el, nick, zone, badge) {
     const entry = state.tags[nick.toLowerCase()];
 
     if (!entry || !entry.tag || !zoneEnabled(zone)) {
@@ -179,16 +186,111 @@
     node.title = tooltipFor(entry);
     node.style.setProperty('--entag-size', (state.settings.badgeSize || 10) + 'px');
 
-    if (!badge) {
-      if (VOID_TAGS.has(el.tagName)) el.insertAdjacentElement('afterend', node);
-      else el.appendChild(node);
+    if (!badge) attachBadge(el, node);
+  }
+
+  /* Le flag whisp apparaît sur tout pseudo hors du salon (liste des membres,
+     recherche, fiche) dont une conversation privée est ouverte à gauche. */
+  function wantsWhisperFlag(el, nick, zone) {
+    if (state.settings.showWhisperFlag === false) return false;
+    if (zone === 'message' || el.closest(STATE_SCOPE)) return false;
+    return whisperNicks.has(nick.toLowerCase());
+  }
+
+  function syncWhisperFlag(el, nick, zone, flag) {
+    if (!wantsWhisperFlag(el, nick, zone)) {
+      if (flag) flag.remove();
+      return;
     }
+
+    const node = flag || document.createElement('span');
+    const text = 'Conversation privée ouverte avec ' + nick;
+    node.className = 'entag-whisper';
+    node.dataset.entagWhisperFor = nick;
+    node.setAttribute('role', 'img');
+    node.setAttribute('aria-label', text);
+    node.title = text;
+
+    if (!flag) attachFlag(el, node);
+  }
+
+  function decorate(el) {
+    if (!el || !el.isConnected) return;
+    if (el.closest(OWN_CLASSES)) return;
+    if (looksLikeChannel(el)) return;
+
+    const badge = existingBadge(el);
+    const flag = existingFlag(el);
+
+    /* Un conteneur (ex. .kiwi-nicklist-user) peut matcher en même temps que le
+       pseudo qu'il contient : seul l'élément le plus interne est décoré. */
+    if (selector && el.querySelector(selector)) {
+      if (badge) badge.remove();
+      if (flag) flag.remove();
+      return;
+    }
+
+    const nick = extractNick(el);
+
+    if (!isValidNick(nick)) {
+      if (badge) badge.remove();
+      if (flag) flag.remove();
+      return;
+    }
+
+    el.dataset.entagNick = nick;
+    el.classList.add('entag-nick');
+
+    const zone = zoneOf(el);
+    syncBadge(el, nick, zone, badge);
+    syncWhisperFlag(el, nick, zone, flag);
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Conversations privées ouvertes (rubrique MESSAGES, à gauche)         */
+  /* ------------------------------------------------------------------ */
+
+  function collectWhisperNicks() {
+    const found = new Set();
+    if (!selector) return found;
+    document.querySelectorAll(STATE_SCOPE).forEach((box) => {
+      if (box.closest(OWN_CLASSES)) return;
+      let list;
+      try {
+        list = box.querySelectorAll(selector);
+      } catch (err) {
+        return;
+      }
+      list.forEach((el) => {
+        if (el.closest(OWN_CLASSES) || looksLikeChannel(el) || el.querySelector(selector)) return;
+        const nick = extractNick(el);
+        if (isValidNick(nick)) found.add(nick.toLowerCase());
+      });
+    });
+    return found;
+  }
+
+  /* Recalcule la liste ; renvoie true si elle a changé. */
+  function refreshWhisper() {
+    const next = collectWhisperNicks();
+    let changed = next.size !== whisperNicks.size;
+    if (!changed) {
+      for (const nick of next) {
+        if (!whisperNicks.has(nick)) {
+          changed = true;
+          break;
+        }
+      }
+    }
+    whisperNicks = next;
+    return changed;
   }
 
   function scan(root) {
     if (!ready || !selector) return;
     const scope = root && root.nodeType === Node.ELEMENT_NODE ? root : document.body;
     if (!scope) return;
+    if (scope === document.body) refreshWhisper();
     if (scope.matches && scope.matches(selector)) decorate(scope);
     let found;
     try {
@@ -216,15 +318,35 @@
 
   function isOurNode(node) {
     return node.nodeType === Node.ELEMENT_NODE &&
-      (node.classList.contains('entag-badge') || node.classList.contains('entag-menu') ||
-       node.classList.contains('entag-toast'));
+      (node.classList.contains('entag-badge') || node.classList.contains('entag-whisper') ||
+       node.classList.contains('entag-menu') || node.classList.contains('entag-toast'));
+  }
+
+  /* Mutation qui n'ajoute / retire que nos propres éléments : on l'ignore. */
+  function onlyOurNodes(record) {
+    if (record.type !== 'childList') return false;
+    const nodes = Array.from(record.addedNodes).concat(Array.from(record.removedNodes));
+    return nodes.length > 0 && nodes.every(isOurNode);
+  }
+
+  /* La mutation touche-t-elle la barre de gauche (conversations privées) ? */
+  function touchesState(record) {
+    const target = record.target instanceof Element ? record.target : record.target.parentElement;
+    if (target && target.closest(STATE_SCOPE)) return true;
+    if (record.type !== 'childList') return false;
+    const nodes = Array.from(record.addedNodes).concat(Array.from(record.removedNodes));
+    return nodes.some((n) => n.nodeType === Node.ELEMENT_NODE &&
+      (n.matches(STATE_SCOPE) || n.querySelector(STATE_SCOPE)));
   }
 
   function startObserver() {
     if (observer) observer.disconnect();
     observer = new MutationObserver((records) => {
       const roots = new Set();
+      let stateTouched = false;
       for (const record of records) {
+        if (onlyOurNodes(record)) continue;
+        if (!stateTouched && touchesState(record)) stateTouched = true;
         if (record.type === 'characterData') {
           const parent = record.target.parentElement;
           if (parent && !parent.closest(OWN_CLASSES)) roots.add(parent);
@@ -239,6 +361,8 @@
           roots.add(node);
         }
       }
+      /* Conversation privée ouverte ou fermée : on remet à jour les flags. */
+      if (stateTouched && refreshWhisper()) scheduleFullScan();
       if (!roots.size) return;
       if (roots.size > 40) {
         scheduleFullScan();
