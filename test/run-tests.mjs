@@ -300,6 +300,50 @@ await page.waitForTimeout(200);
 check('mode pipette désactivé après le clic',
   !(await page.evaluate(() => document.documentElement.classList.contains('entag-picking'))));
 
+/* 8. Onglet « Chatteurs » : liste à colonnes, classes différentes de Kiwi ----- */
+await page.goto(pathToFileURL(join(here, 'fixture-chatteurs.html')).href);
+await page.addStyleTag({ content: read('src/content/content.css') });
+await page.addScriptTag({ content: read('src/common/store.js') });
+await page.addScriptTag({ content: read('src/content/content.js') });
+await page.waitForTimeout(400);
+
+const chatterRows = () => page.evaluate(() =>
+  Array.from(document.querySelectorAll('#chatters .row')).map((row) => ({
+    nick: row.querySelector('.cell-username').dataset.entagNick || row.querySelector('.cell-username').textContent.trim(),
+    hidden: getComputedStyle(row).display === 'none'
+  })));
+const hiddenChatters = async () => (await chatterRows()).filter((r) => r.hidden).map((r) => r.nick);
+
+const chip2 = page.locator('.entag-filter');
+check('chatteurs : flag whisp sur Soraka, anais-24 et _petitebrune',
+  (await page.locator('#chatters .entag-whisper').count()) === 3, await page.locator('#chatters .entag-whisper').count());
+check('chatteurs : bouton de filtre visible avec le compteur (3)',
+  (await chip2.isVisible()) && /\(3\)/.test(await chip2.textContent()), await chip2.textContent());
+const placed2 = await page.evaluate(() => {
+  const c = document.querySelector('.entag-filter').getBoundingClientRect();
+  const l = document.querySelector('.side-panel').getBoundingClientRect();
+  return c.left >= l.left - 1 && c.right <= l.right + 1 && c.top >= l.top && c.bottom <= l.bottom + 1;
+});
+check('chatteurs : bouton placé dans le panneau de droite', placed2);
+
+await chip2.click();
+await page.waitForTimeout(300);
+check('chatteurs : les 3 lignes entières (pseudo + âge + ville) sont masquées',
+  JSON.stringify(await hiddenChatters()) === JSON.stringify(['Soraka', 'anais-24', '_petitebrune']), await hiddenChatters());
+check('chatteurs : les autres chatteurs restent visibles',
+  (await chatterRows()).filter((r) => !r.hidden).length === 4);
+check('chatteurs : les filtres (champ Nick, cases) ne sont pas masqués',
+  await page.evaluate(() => getComputedStyle(document.getElementById('filter-input')).display !== 'none' &&
+    getComputedStyle(document.querySelector('.filters')).display !== 'none'));
+check('chatteurs : une fiche isolée (Soraka + bouton) n\'est pas masquée',
+  await page.evaluate(() => getComputedStyle(document.getElementById('card')).display !== 'none'));
+check('chatteurs : le bouton reste affiché quand tout est masqué',
+  (await chip2.isVisible()) && /masqués \(3\)/.test(await chip2.textContent()), await chip2.textContent());
+
+await chip2.click();
+await page.waitForTimeout(300);
+check('chatteurs : filtre coupé, toutes les lignes reviennent', (await hiddenChatters()).length === 0, await hiddenChatters());
+
 await browser.close();
 
 const failed = results.filter((r) => !r.ok);

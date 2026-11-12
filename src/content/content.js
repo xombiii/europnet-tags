@@ -251,15 +251,18 @@
     const target = isWhisperTarget(el, nick, zone);
     syncBadge(el, nick, zone, badge);
     syncWhisperFlag(el, nick, flag, target);
-    syncWhisperRow(el, zone, target);
+    syncWhisperRow(el, target);
   }
 
   /* ------------------------------------------------------------------ */
   /* Filtre : masquer les pseudos en conversation privée                  */
   /* ------------------------------------------------------------------ */
 
-  /* Nombre de pseudos différents dans un élément : > 1 = c'est la liste, pas une ligne. */
-  function distinctNicks(root) {
+  const FLAGGED = '.entag-nick[data-entag-whispered]';
+  const ROW_STOP_TAGS = /^(UL|OL|NAV|MAIN|ASIDE|TABLE|TBODY|THEAD|SECTION)$/;
+
+  /* Nombre de pseudos différents dans un élément (on s'arrête à `limit`). */
+  function countNicks(root, limit) {
     const nicks = new Set();
     if (!selector) return 0;
     let list;
@@ -268,27 +271,34 @@
     } catch (err) {
       return 0;
     }
-    list.forEach((node) => {
-      if (node.closest(OWN_CLASSES)) return;
+    for (const node of list) {
+      if (node.closest(OWN_CLASSES)) continue;
       const nick = extractNick(node);
-      if (isValidNick(nick)) nicks.add(nick.toLowerCase());
-    });
+      if (!isValidNick(nick)) continue;
+      nicks.add(nick.toLowerCase());
+      if (limit && nicks.size >= limit) break;
+    }
     return nicks.size;
   }
 
   /* Ligne de la liste qui contient ce pseudo (celle qu'on masque) : on remonte
      tant que le parent ne contient que ce pseudo, sans jamais englober un champ
-     de saisie (recherche) ni la liste entière. */
+     de saisie (filtres, recherche). Renvoie null si le pseudo n'est pas dans une
+     liste (fiche isolée, fenêtre de profil...) : on ne masque alors rien. */
   function rowOf(el) {
+    const base = el.getBoundingClientRect();
     let row = el;
-    for (let i = 0; i < 3; i += 1) {
+    for (let i = 0; i < 6; i += 1) {
       const parent = row.parentElement;
-      if (!parent || parent === document.body || /^(UL|OL|NAV|MAIN|ASIDE)$/.test(parent.tagName)) break;
-      if (distinctNicks(parent) > 1) break;
-      if (parent.querySelector('input, textarea, select, button')) break;
+      if (!parent || parent === document.body || ROW_STOP_TAGS.test(parent.tagName)) break;
+      if (countNicks(parent, 2) > 1) break;
+      if (parent.querySelector('input, textarea, select')) break;
+      /* Une ligne reste de la hauteur d'un pseudo : au-delà, c'est un bloc. */
+      if (base.height > 0 && parent.getBoundingClientRect().height > Math.max(60, base.height * 4)) break;
       row = parent;
     }
-    return row;
+    const container = row.parentElement;
+    return container && countNicks(container, 2) > 1 ? row : null;
   }
 
   function showRowOf(el) {
@@ -296,13 +306,15 @@
     if (row) row.removeAttribute('data-entag-hidden');
   }
 
-  function syncWhisperRow(el, zone, target) {
-    const listed = target && zone === 'nicklist';
-    if (listed) el.dataset.entagWhispered = '1';
+  function syncWhisperRow(el, target) {
+    if (target) el.dataset.entagWhispered = '1';
     else delete el.dataset.entagWhispered;
 
-    if (listed && state.settings.hideWhispered === true) {
-      rowOf(el).setAttribute('data-entag-hidden', '');
+    if (target && state.settings.hideWhispered === true) {
+      if (!el.closest('[data-entag-hidden]')) {
+        const row = rowOf(el);
+        if (row) row.setAttribute('data-entag-hidden', '');
+      }
     } else {
       showRowOf(el);
     }
@@ -310,6 +322,7 @@
 
   let filterChip = null;
   let chipScheduled = false;
+  let listAnchor = null;
 
   function scheduleChipUpdate() {
     if (chipScheduled) return;
@@ -340,14 +353,45 @@
     return filterChip;
   }
 
-  /* Bouton flottant, accroché en bas de la liste des membres. */
+  /* Panneau de la liste où se trouvent les pseudos whisp : on part du premier
+     pseudo concerné, on remonte jusqu'au bloc qui contient plusieurs pseudos
+     (la liste) puis jusqu'au parent le plus haut qui ne contient pas d'autres
+     pseudos (liste + filtres, sans le salon). Aucune classe CSS du site n'est
+     supposée. */
+  function findListAnchor() {
+    const flagged = document.querySelectorAll(FLAGGED);
+    for (let i = 0; i < flagged.length && i < 5; i += 1) {
+      let node = flagged[i].parentElement;
+      for (let depth = 0; node && node !== document.body && depth < 12; depth += 1) {
+        if (countNicks(node, 3) >= 3) break;
+        node = node.parentElement;
+      }
+      if (!node || node === document.body) continue;
+      const total = countNicks(node);
+      let best = node;
+      for (let p = node.parentElement; p && p !== document.body && p !== document.documentElement; p = p.parentElement) {
+        if (countNicks(p) !== total) break;
+        best = p;
+      }
+      return best;
+    }
+    return null;
+  }
+
+  /* Bouton flottant, accroché en bas du panneau de la liste. */
   function updateFilterChip() {
     chipScheduled = false;
     if (!document.body) return;
-    const container = document.querySelector(NICKLIST_SCOPE);
-    const rect = container ? container.getBoundingClientRect() : null;
-    const count = document.querySelectorAll('.entag-nick[data-entag-whispered]').length;
+
+    if (!listAnchor || !listAnchor.isConnected || !listAnchor.querySelector(FLAGGED)) {
+      const found = findListAnchor();
+      if (found) listAnchor = found;
+      else if (listAnchor && !listAnchor.isConnected) listAnchor = null;
+    }
+
     const active = state.settings.hideWhispered === true;
+    const count = listAnchor ? listAnchor.querySelectorAll(FLAGGED).length : 0;
+    const rect = listAnchor ? listAnchor.getBoundingClientRect() : null;
     const visible = rect && rect.width > 80 && rect.height > 40 && (count > 0 || active);
 
     if (!visible) {
@@ -367,7 +411,8 @@
     const width = chip.offsetWidth;
     const height = chip.offsetHeight;
     const bottom = Math.min(rect.bottom, window.innerHeight);
-    chip.style.left = Math.max(4, Math.min(rect.right - width - 8, window.innerWidth - width - 4)) + 'px';
+    const right = Math.min(rect.right, window.innerWidth);
+    chip.style.left = Math.max(4, right - width - 8) + 'px';
     chip.style.top = Math.max(4, bottom - height - 8) + 'px';
   }
 

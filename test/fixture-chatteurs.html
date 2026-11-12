@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <title>Fixture — onglet « Chatteurs » (liste à colonnes, sans classe « nicklist »)</title>
+  <style>
+    body { margin: 0; display: flex; height: 100vh; font: 13px system-ui, sans-serif; }
+    .kiwi-statebrowser { width: 200px; background: #0f2c52; color: #dbeafe; padding: 12px; }
+    .kiwi-statebrowser-channel { padding: 3px 0; }
+    .stage { flex: 1; padding: 12px; }
+    .side-panel { width: 340px; background: #eef2f7; display: flex; flex-direction: column; }
+    .filters { padding: 10px; border-bottom: 1px solid #cbd5e1; }
+    .filters label { margin-right: 8px; }
+    .scroller { flex: 1; overflow: auto; padding: 4px 10px; }
+    .row { display: flex; gap: 10px; padding: 3px 0; }
+    .cell-username { width: 150px; font-weight: 600; color: #db2777; }
+    .cell { width: 40px; }
+    .cell-city { flex: 1; }
+  </style>
+</head>
+<body>
+  <nav class="kiwi-statebrowser">
+    <h3>Messages</h3>
+    <div class="kiwi-statebrowser-channel"><span class="kiwi-statebrowser-channel-name">Soraka</span></div>
+    <div class="kiwi-statebrowser-channel"><span class="kiwi-statebrowser-channel-name">anais-24</span></div>
+    <div class="kiwi-statebrowser-channel"><span class="kiwi-statebrowser-channel-name">_petitebrune</span></div>
+  </nav>
+
+  <main class="stage">
+    <div id="card" class="usercard"><span class="cell-username">Soraka</span> <button type="button">Écrire</button></div>
+  </main>
+
+  <aside class="side-panel">
+    <div class="filters">
+      <label><input type="checkbox"> Male</label>
+      <label><input type="checkbox" checked> Female</label>
+      <select><option>18 - 25</option></select>
+      <input type="text" placeholder="Nick" id="filter-input">
+    </div>
+    <div class="scroller" id="chatters">
+      <div class="row"><span class="cell-username">Signit</span><span class="cell">18</span><span class="cell-city">Avec le loups</span></div>
+      <div class="row"><span class="cell-username">Soraka</span><span class="cell">21</span><span class="cell-city">Massy</span></div>
+      <div class="row"><span class="cell-username">Souestelle</span><span class="cell">24</span><span class="cell-city">Sornisse</span></div>
+      <div class="row"><span class="cell-username">anais-24</span><span class="cell">24</span><span class="cell-city">paris</span></div>
+      <div class="row"><span class="cell-username">_petitebrune</span><span class="cell">24</span><span class="cell-city">à asservir</span></div>
+      <div class="row"><span class="cell-username">leakitty</span><span class="cell">18</span><span class="cell-city">Rennes</span></div>
+      <div class="row"><span class="cell-username">lola18bi</span><span class="cell">18</span><span class="cell-city">Poitiers</span></div>
+    </div>
+  </aside>
+</body>
+</html>
