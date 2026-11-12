@@ -7,7 +7,7 @@
   const $ = (id) => document.getElementById(id);
 
   const BUILTIN_HOSTS = ['*://*.europnet.org/*', '*://europnet.org/*'];
-  const CHECKBOXES = ['showInMessages', 'showInNicklist', 'showInSidebar', 'showWhisperFlag', 'showNoteTooltip', 'contextMenuEnabled'];
+  const CHECKBOXES = ['showInMessages', 'showInNicklist', 'showInSidebar', 'showWhisperFlag', 'hideWhispered', 'showNoteTooltip', 'contextMenuEnabled'];
 
   let settings = Object.assign({}, S.DEFAULT_SETTINGS);
   let statusTimer = 0;

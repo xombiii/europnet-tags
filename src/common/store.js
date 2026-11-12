@@ -49,6 +49,7 @@
     showInNicklist: true,
     showInSidebar: true,
     showWhisperFlag: true,
+    hideWhispered: false,
     badgeSize: 10,
     showNoteTooltip: true,
     contextMenuEnabled: true,

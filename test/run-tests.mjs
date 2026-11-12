@@ -198,6 +198,74 @@ await page.evaluate(() => browser.storage.local.set({ settings: {} }));
 await page.waitForTimeout(300);
 check('flag whisp de retour quand le réglage est réactivé', (await whisperFlags()).length === 1);
 
+/* 4c. Filtre : masquer de la liste les pseudos en conversation privée -------- */
+const rowHidden = (nick) => page.evaluate((n) => {
+  const el = Array.from(document.querySelectorAll('#nicklist .kiwi-nicklist-user-nick'))
+    .find((e) => e.dataset.entagNick === n);
+  return getComputedStyle(el.closest('.kiwi-nicklist-user')).display === 'none';
+}, nick);
+const allNicks = ['Maitresse', 'Althanea', '_laura', '__TravSoum_75-44', 'coeur_de_dragon'];
+const hiddenNow = async () => {
+  const out = [];
+  for (const n of allNicks) if (await rowHidden(n)) out.push(n);
+  return out;
+};
+const chip = page.locator('.entag-filter');
+
+check('bouton de filtre affiché avec le nombre de whisp (1)',
+  (await chip.isVisible()) && /\(1\)/.test(await chip.textContent()), await chip.textContent());
+const placed = await page.evaluate(() => {
+  const c = document.querySelector('.entag-filter').getBoundingClientRect();
+  const l = document.getElementById('nicklist').getBoundingClientRect();
+  return c.left >= l.left - 1 && c.right <= l.right + 1 && c.top >= l.top && c.bottom <= l.bottom + 1;
+});
+check('bouton placé dans le cadre de la liste des membres', placed);
+check('aucune ligne masquée tant que le filtre est coupé', (await hiddenNow()).length === 0, await hiddenNow());
+
+await chip.click();
+await page.waitForTimeout(300);
+check('filtre actif : la ligne entière de %Althanea est masquée',
+  JSON.stringify(await hiddenNow()) === JSON.stringify(['Althanea']), await hiddenNow());
+check('filtre actif : la liste elle-même reste affichée',
+  await page.evaluate(() => getComputedStyle(document.getElementById('nicklist')).display !== 'none'));
+check('réglage enregistré (hideWhispered)',
+  await page.evaluate(() => globalThis.__entagStore.settings.hideWhispered === true));
+check('bouton en mode actif', /masqués \(1\)/.test(await chip.textContent()), await chip.textContent());
+
+/* Ouverture / fermeture d'une conversation privée avec le filtre actif. */
+await page.evaluate(() => {
+  const row = document.createElement('div');
+  row.className = 'kiwi-statebrowser-channel';
+  row.innerHTML = '<span class="kiwi-statebrowser-channel-name">_laura</span>';
+  document.querySelector('.kiwi-statebrowser').appendChild(row);
+});
+await page.waitForTimeout(400);
+check('nouvelle conversation privée : _laura disparaît de la liste',
+  JSON.stringify(await hiddenNow()) === JSON.stringify(['Althanea', '_laura']), await hiddenNow());
+check('compteur du bouton mis à jour (2)', /\(2\)/.test(await chip.textContent()), await chip.textContent());
+
+await page.evaluate(() => {
+  const names = Array.from(document.querySelectorAll('.kiwi-statebrowser-channel-name'));
+  names.find((el) => el.textContent.trim() === '_laura').closest('.kiwi-statebrowser-channel').remove();
+});
+await page.waitForTimeout(400);
+check('conversation fermée : _laura réapparaît dans la liste',
+  JSON.stringify(await hiddenNow()) === JSON.stringify(['Althanea']), await hiddenNow());
+
+/* Désactivation depuis le bouton. */
+await chip.click();
+await page.waitForTimeout(300);
+check('filtre coupé : toutes les lignes sont de nouveau visibles', (await hiddenNow()).length === 0, await hiddenNow());
+check('bouton revenu à « Masquer »', /^Masquer/.test(await chip.textContent()), await chip.textContent());
+
+/* Le réglage fonctionne aussi depuis la page d'options (stockage partagé). */
+await page.evaluate(() => browser.storage.local.set({ settings: { hideWhispered: true } }));
+await page.waitForTimeout(400);
+check('filtre activé via les options', JSON.stringify(await hiddenNow()) === JSON.stringify(['Althanea']), await hiddenNow());
+await page.evaluate(() => browser.storage.local.set({ settings: {} }));
+await page.waitForTimeout(400);
+check('filtre désactivé via les options', (await hiddenNow()).length === 0, await hiddenNow());
+
 /* 5. Menu au clic droit ---------------------------------------------------- */
 await page.locator('#nicklist .kiwi-nicklist-user-nick', { hasText: 'coeur_de_dragon' }).click({ button: 'right' });
 await page.waitForTimeout(120);

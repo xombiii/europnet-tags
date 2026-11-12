@@ -57,6 +57,29 @@
   border-color: #3b82f6 transparent transparent transparent !important;
 }
 
+/* Filtre « masquer les whisp » : ligne masquée + bouton flottant. */
+[data-entag-hidden] { display: none !important; }
+
+.entag-filter {
+  position: fixed !important;
+  z-index: 2147482000 !important;
+  max-width: 260px;
+  margin: 0 !important;
+  padding: 4px 10px !important;
+  border: 1px solid rgba(255, 255, 255, .55) !important;
+  border-radius: 999px !important;
+  background: #2563eb !important;
+  color: #ffffff !important;
+  font: 600 11px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif !important;
+  white-space: nowrap;
+  cursor: pointer !important;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, .4) !important;
+}
+
+.entag-filter:hover { background: #1d4ed8 !important; }
+.entag-filter.is-active { background: #0f172a !important; border-color: #3b82f6 !important; }
+.entag-filter[hidden] { display: none !important; }
+
 /* ------------------------------------------------------------------ */
 /* Menu du clic droit                                                  */
 /* ------------------------------------------------------------------ */

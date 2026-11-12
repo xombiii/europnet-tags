@@ -18,6 +18,11 @@ localement dans le navigateur.
   sur ce même pseudo dans la liste des membres / la recherche à droite, avec sa
   pastille de fiabilité s'il est tagué. Le flag disparaît quand la conversation
   est fermée et se désactive dans les options.
+- **Bouton « Masquer les whisp (N) »** en bas de la liste des membres : un clic
+  masque de la liste tous les pseudos avec qui une conversation privée est déjà
+  ouverte (la ligne entière disparaît), un second clic les réaffiche. Le compteur
+  suit les ouvertures / fermetures de conversations ; le choix est mémorisé et
+  réglable aussi dans les options.
 - **Infobulle** au survol de la pastille : pseudo, niveau de fiabilité et note.
 - **Clic gauche sur une pastille** → rouvre le menu pour modifier le tag.
 - **Popup de l'extension** : liste complète des pseudos tagués, recherche, filtres
@@ -57,6 +62,7 @@ zip -r -FS ../europnet-tags.zip . -x '*.git*' 'test/*'
 | Ajouter une note | Champ « Note » du menu, validé par <kbd>Entrée</kbd> |
 | Retirer un tag | Clic droit → « Retirer le tag » |
 | Voir qui j'ai déjà whispé | Bulle bleue dans la liste des membres (conversation ouverte dans MESSAGES) |
+| Cacher ceux avec qui j'ai déjà une conversation | Bouton « Masquer les whisp » en bas de la liste des membres |
 | Voir / gérer tous les tags | Icône de l'extension dans la barre d'outils |
 | Sauvegarder la liste | Popup → « Exporter » (fichier JSON) |
 
@@ -100,4 +106,5 @@ Ils vérifient le nettoyage des pseudos (`Bigbi ♂`, `@Maitresse`, `%Althanea`)
 l'exclusion des salons (`#BDSM`), l'affichage des pastilles dans les trois zones,
 l'absence de doublons, la prise en compte des nouveaux messages, le menu du clic
 droit, l'enregistrement des tags et notes, le flag « whisp » (ouverture et fermeture
-d'une conversation privée, ordre pastille / flag, réglage) et le mode pipette.
+d'une conversation privée, ordre pastille / flag, réglage), le filtre qui masque
+les lignes de la liste (bouton, compteur, réglage des options) et le mode pipette.

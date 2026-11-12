@@ -8,7 +8,8 @@
  * 4. propose un mode « pipette » pour apprendre un sélecteur si le site change ;
  * 5. pose un flag « whisp » (bulle bleue) dans la liste des membres sur les
  *    pseudos avec qui une conversation privée est ouverte dans la barre de
- *    gauche (rubrique MESSAGES).
+ *    gauche (rubrique MESSAGES) ;
+ * 6. propose un bouton pour masquer ces pseudos de la liste des membres.
  */
 (function () {
   'use strict';
@@ -16,7 +17,10 @@
   const S = globalThis.ENTag;
   const api = S.api;
 
-  const OWN_CLASSES = '.entag-badge, .entag-whisper, .entag-menu, .entag-toast';
+  const OWN_CLASSES = '.entag-badge, .entag-whisper, .entag-filter, .entag-menu, .entag-toast';
+  /* Liste des membres (à droite). */
+  const NICKLIST_SCOPE = '[class*="nicklist" i], [class*="memberlist" i], [class*="userlist" i], ' +
+    '[class*="member-list" i], [class*="user-list" i]';
   /* Barre de gauche (salons + messages privés) : source des conversations
      privées ouvertes. */
   const STATE_SCOPE = '[class*="statebrowser" i], [class*="channellist" i]';
@@ -105,7 +109,7 @@
   /* ------------------------------------------------------------------ */
 
   function zoneOf(el) {
-    if (el.closest('[class*="nicklist" i], [class*="memberlist" i], [class*="userlist" i], [class*="member-list" i], [class*="user-list" i]')) {
+    if (el.closest(NICKLIST_SCOPE)) {
       return 'nicklist';
     }
     if (el.closest('[class*="messagelist" i], [class*="message-list" i], [class*="messages" i], [class*="chat" i]')) {
@@ -191,14 +195,13 @@
 
   /* Le flag whisp apparaît sur tout pseudo hors du salon (liste des membres,
      recherche, fiche) dont une conversation privée est ouverte à gauche. */
-  function wantsWhisperFlag(el, nick, zone) {
-    if (state.settings.showWhisperFlag === false) return false;
+  function isWhisperTarget(el, nick, zone) {
     if (zone === 'message' || el.closest(STATE_SCOPE)) return false;
     return whisperNicks.has(nick.toLowerCase());
   }
 
-  function syncWhisperFlag(el, nick, zone, flag) {
-    if (!wantsWhisperFlag(el, nick, zone)) {
+  function syncWhisperFlag(el, nick, flag, target) {
+    if (!target || state.settings.showWhisperFlag === false) {
       if (flag) flag.remove();
       return;
     }
@@ -227,6 +230,7 @@
     if (selector && el.querySelector(selector)) {
       if (badge) badge.remove();
       if (flag) flag.remove();
+      showRowOf(el);
       return;
     }
 
@@ -235,6 +239,8 @@
     if (!isValidNick(nick)) {
       if (badge) badge.remove();
       if (flag) flag.remove();
+      delete el.dataset.entagWhispered;
+      showRowOf(el);
       return;
     }
 
@@ -242,8 +248,127 @@
     el.classList.add('entag-nick');
 
     const zone = zoneOf(el);
+    const target = isWhisperTarget(el, nick, zone);
     syncBadge(el, nick, zone, badge);
-    syncWhisperFlag(el, nick, zone, flag);
+    syncWhisperFlag(el, nick, flag, target);
+    syncWhisperRow(el, zone, target);
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Filtre : masquer les pseudos en conversation privée                  */
+  /* ------------------------------------------------------------------ */
+
+  /* Nombre de pseudos différents dans un élément : > 1 = c'est la liste, pas une ligne. */
+  function distinctNicks(root) {
+    const nicks = new Set();
+    if (!selector) return 0;
+    let list;
+    try {
+      list = root.querySelectorAll(selector);
+    } catch (err) {
+      return 0;
+    }
+    list.forEach((node) => {
+      if (node.closest(OWN_CLASSES)) return;
+      const nick = extractNick(node);
+      if (isValidNick(nick)) nicks.add(nick.toLowerCase());
+    });
+    return nicks.size;
+  }
+
+  /* Ligne de la liste qui contient ce pseudo (celle qu'on masque) : on remonte
+     tant que le parent ne contient que ce pseudo, sans jamais englober un champ
+     de saisie (recherche) ni la liste entière. */
+  function rowOf(el) {
+    let row = el;
+    for (let i = 0; i < 3; i += 1) {
+      const parent = row.parentElement;
+      if (!parent || parent === document.body || /^(UL|OL|NAV|MAIN|ASIDE)$/.test(parent.tagName)) break;
+      if (distinctNicks(parent) > 1) break;
+      if (parent.querySelector('input, textarea, select, button')) break;
+      row = parent;
+    }
+    return row;
+  }
+
+  function showRowOf(el) {
+    const row = el.closest('[data-entag-hidden]');
+    if (row) row.removeAttribute('data-entag-hidden');
+  }
+
+  function syncWhisperRow(el, zone, target) {
+    const listed = target && zone === 'nicklist';
+    if (listed) el.dataset.entagWhispered = '1';
+    else delete el.dataset.entagWhispered;
+
+    if (listed && state.settings.hideWhispered === true) {
+      rowOf(el).setAttribute('data-entag-hidden', '');
+    } else {
+      showRowOf(el);
+    }
+  }
+
+  let filterChip = null;
+  let chipScheduled = false;
+
+  function scheduleChipUpdate() {
+    if (chipScheduled) return;
+    chipScheduled = true;
+    requestAnimationFrame(updateFilterChip);
+  }
+
+  async function toggleHideWhispered() {
+    const next = state.settings.hideWhispered !== true;
+    state.settings = await S.saveSettings({ hideWhispered: next });
+    scan(document.body);
+    toast(next ? 'Conversations privées masquées dans la liste' : 'Conversations privées de nouveau visibles');
+  }
+
+  function ensureFilterChip() {
+    if (filterChip && filterChip.isConnected) return filterChip;
+    filterChip = document.createElement('button');
+    filterChip.type = 'button';
+    filterChip.className = 'entag-filter';
+    filterChip.hidden = true;
+    filterChip.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      void toggleHideWhispered();
+    });
+    filterChip.addEventListener('contextmenu', (event) => event.stopPropagation());
+    document.body.appendChild(filterChip);
+    return filterChip;
+  }
+
+  /* Bouton flottant, accroché en bas de la liste des membres. */
+  function updateFilterChip() {
+    chipScheduled = false;
+    if (!document.body) return;
+    const container = document.querySelector(NICKLIST_SCOPE);
+    const rect = container ? container.getBoundingClientRect() : null;
+    const count = document.querySelectorAll('.entag-nick[data-entag-whispered]').length;
+    const active = state.settings.hideWhispered === true;
+    const visible = rect && rect.width > 80 && rect.height > 40 && (count > 0 || active);
+
+    if (!visible) {
+      if (filterChip) filterChip.hidden = true;
+      return;
+    }
+
+    const chip = ensureFilterChip();
+    chip.textContent = active
+      ? 'Whisp masqués (' + count + ') — afficher'
+      : 'Masquer les whisp (' + count + ')';
+    chip.setAttribute('aria-pressed', String(active));
+    chip.title = 'Masque dans la liste les pseudos avec qui une conversation privée est déjà ouverte';
+    chip.classList.toggle('is-active', active);
+    chip.hidden = false;
+
+    const width = chip.offsetWidth;
+    const height = chip.offsetHeight;
+    const bottom = Math.min(rect.bottom, window.innerHeight);
+    chip.style.left = Math.max(4, Math.min(rect.right - width - 8, window.innerWidth - width - 4)) + 'px';
+    chip.style.top = Math.max(4, bottom - height - 8) + 'px';
   }
 
   /* ------------------------------------------------------------------ */
@@ -299,6 +424,7 @@
       return;
     }
     found.forEach(decorate);
+    if (scope === document.body) scheduleChipUpdate();
   }
 
   function scheduleFullScan() {
@@ -319,7 +445,7 @@
   function isOurNode(node) {
     return node.nodeType === Node.ELEMENT_NODE &&
       (node.classList.contains('entag-badge') || node.classList.contains('entag-whisper') ||
-       node.classList.contains('entag-menu') || node.classList.contains('entag-toast'));
+       node.classList.contains('entag-filter') || node.classList.contains('entag-menu') || node.classList.contains('entag-toast'));
   }
 
   /* Mutation qui n'ajoute / retire que nos propres éléments : on l'ignore. */
@@ -364,6 +490,7 @@
       /* Conversation privée ouverte ou fermée : on remet à jour les flags. */
       if (stateTouched && refreshWhisper()) scheduleFullScan();
       if (!roots.size) return;
+      scheduleChipUpdate();
       if (roots.size > 40) {
         scheduleFullScan();
         return;
@@ -650,7 +777,11 @@
     document.addEventListener('click', onPickClick, true);
     document.addEventListener('mousedown', onDocumentPointerDown, true);
     document.addEventListener('keydown', onKeyDown, true);
-    window.addEventListener('scroll', () => closeMenu(), true);
+    window.addEventListener('scroll', () => {
+      closeMenu();
+      scheduleChipUpdate();
+    }, true);
+    window.addEventListener('resize', scheduleChipUpdate);
     startObserver();
     scan(document.body);
   }
