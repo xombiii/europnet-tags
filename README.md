@@ -23,6 +23,16 @@ localement dans le navigateur.
   ouverte (la ligne entière disparaît), un second clic les réaffiche. Le compteur
   suit les ouvertures / fermetures de conversations ; le choix est mémorisé et
   réglable aussi dans les options.
+- **Détecteur d'alias** : quand un pseudo ressemble à l'un de tes pseudos tagués, un
+  **anneau creux de la couleur de ce tag** apparaît à côté (infobulle : « Alias probable
+  de X — 98 % », avec les raisons). Clic droit sur le pseudo → **Appliquer son tag** (le
+  pseudo reçoit le même tag, avec la note « Alias de X ») ou **Ce n'est pas lui** (écarté
+  pour tout le groupe d'alias). Dans le popup, le bouton **Alias** sur chaque pseudo tagué
+  liste les alias possibles parmi tous les pseudos déjà vus, avec score, raisons et date.
+  Le score repose sur la ressemblance des pseudos (« anais-24 » / « anais_24 », leet,
+  accents, lettre en plus), le même nombre, la même ville et le même âge lus dans la
+  liste des chatteurs ; un âge et une ville identiques ne suffisent jamais seuls. C'est un
+  indice, jamais une preuve.
 - **Infobulle** au survol de la pastille : pseudo, niveau de fiabilité et note.
 - **Clic gauche sur une pastille** → rouvre le menu pour modifier le tag.
 - **Popup de l'extension** : liste complète des pseudos tagués, recherche, filtres
@@ -62,9 +72,18 @@ zip -r -FS ../europnet-tags.zip . -x '*.git*' 'test/*'
 | Ajouter une note | Champ « Note » du menu, validé par <kbd>Entrée</kbd> |
 | Retirer un tag | Clic droit → « Retirer le tag » |
 | Voir qui j'ai déjà whispé | Bulle bleue dans la liste des membres (conversation ouverte dans MESSAGES) |
+| Trouver les alias d'un pseudo tagué | Popup → bouton « Alias » sur sa ligne (ou anneau dans le tchat) |
 | Cacher ceux avec qui j'ai déjà une conversation | Bouton « Masquer les whisp » en bas de la liste des membres |
 | Voir / gérer tous les tags | Icône de l'extension dans la barre d'outils |
 | Sauvegarder la liste | Popup → « Exporter » (fichier JSON) |
+
+## Données et vie privée
+
+Tout reste dans le navigateur (`storage.local`) ; rien n'est envoyé ailleurs. Pour la
+recherche d'alias, l'extension garde un **historique des pseudos vus** (pseudo, âge et
+ville quand la liste les affiche, première / dernière vue), limité à 5 000 pseudos. Il se
+désactive (case « Repérer les alias… ») et s'efface (« Effacer l'historique des pseudos
+vus ») dans les options. Cet historique n'est pas inclus dans l'export JSON.
 
 ## Si aucune pastille n'apparaît
 
@@ -87,7 +106,8 @@ autre extension de domaine…), ajoute-le dans **Options → Domaines supplémen
 ```
 manifest.json                  Manifest V3 (Firefox 115+)
 src/common/store.js            Stockage partagé (tags + réglages)
-src/content/content.js         Détection des pseudos, pastilles, menu, pipette
+src/content/content.js         Détection des pseudos, pastilles, menu, pipette, alias
+src/common/alias.js            Score d'alias (module pur, partagé content script / popup)
 src/content/content.css        Styles injectés dans la page
 src/background/background.js   Enregistrement des domaines supplémentaires
 src/popup/                     Popup de gestion de la liste
@@ -107,4 +127,6 @@ l'exclusion des salons (`#BDSM`), l'affichage des pastilles dans les trois zones
 l'absence de doublons, la prise en compte des nouveaux messages, le menu du clic
 droit, l'enregistrement des tags et notes, le flag « whisp » (ouverture et fermeture
 d'une conversation privée, ordre pastille / flag, réglage), le filtre qui masque
-les lignes de la liste (bouton, compteur, réglage des options) et le mode pipette.
+les lignes de la liste (bouton, compteur, réglage des options), le score d'alias
+(cas typiques, faux positifs évités, historique, panneau du popup, « Ce n'est pas lui »)
+et le mode pipette.

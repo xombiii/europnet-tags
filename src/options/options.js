@@ -7,7 +7,7 @@
   const $ = (id) => document.getElementById(id);
 
   const BUILTIN_HOSTS = ['*://*.europnet.org/*', '*://europnet.org/*'];
-  const CHECKBOXES = ['showInMessages', 'showInNicklist', 'showInSidebar', 'showWhisperFlag', 'hideWhispered', 'showNoteTooltip', 'contextMenuEnabled'];
+  const CHECKBOXES = ['showInMessages', 'showInNicklist', 'showInSidebar', 'showWhisperFlag', 'hideWhispered', 'detectAliases', 'showNoteTooltip', 'contextMenuEnabled'];
 
   let settings = Object.assign({}, S.DEFAULT_SETTINGS);
   let statusTimer = 0;
@@ -88,6 +88,10 @@
       li.append(name, button);
       list.appendChild(li);
     });
+  }
+
+  async function renderSeenCount() {
+    $('seen-count').textContent = Object.keys(await S.loadSeen()).length;
   }
 
   async function renderCount() {
@@ -176,6 +180,13 @@
     event.target.value = '';
   });
 
+  $('clear-seen').addEventListener('click', async () => {
+    if (!window.confirm("Effacer l'historique des pseudos vus et les alias écartés ?")) return;
+    await S.clearSeen();
+    status('Historique effacé');
+    renderSeenCount();
+  });
+
   $('wipe').addEventListener('click', async () => {
     if (!window.confirm('Supprimer définitivement tous les tags ?')) return;
     await S.replaceTags({});
@@ -186,6 +197,7 @@
   api.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local') return;
     if (changes.tags) renderCount();
+    if (changes.seen) renderSeenCount();
     if (changes.settings) {
       settings = Object.assign({}, S.DEFAULT_SETTINGS, changes.settings.newValue || {});
       renderSettings();
@@ -196,6 +208,7 @@
     settings = await S.loadSettings();
     renderSettings();
     renderCount();
+    renderSeenCount();
     renderHosts();
   })();
 })();

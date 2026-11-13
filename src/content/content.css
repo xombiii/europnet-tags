@@ -24,6 +24,33 @@
 .entag-badge--yellow { background: #f59e0b !important; }
 .entag-badge--red    { background: #ef4444 !important; }
 
+/* Alias probable d'un pseudo tagué : anneau creux de la couleur de son tag. */
+.entag-alias {
+  --entag-size: 10px;
+  display: inline-block !important;
+  box-sizing: border-box !important;
+  width: var(--entag-size) !important;
+  height: var(--entag-size) !important;
+  min-width: var(--entag-size) !important;
+  margin: 0 0 0 5px !important;
+  padding: 0 !important;
+  border-radius: 50% !important;
+  border: 2px solid #94a3b8 !important;
+  background: transparent !important;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, .55) !important;
+  vertical-align: middle !important;
+  flex: none !important;
+  cursor: pointer !important;
+  font-size: 0 !important;
+  line-height: 0 !important;
+  text-indent: -9999px !important;
+  overflow: hidden !important;
+}
+
+.entag-alias--green  { border-color: #22c55e !important; }
+.entag-alias--yellow { border-color: #f59e0b !important; }
+.entag-alias--red    { border-color: #ef4444 !important; }
+
 /* Flag « whisp » : petite bulle bleue = conversation privée ouverte. */
 .entag-whisper {
   position: relative !important;
@@ -109,6 +136,20 @@
   border-bottom: 1px solid #e5e7eb;
   overflow-wrap: anywhere;
 }
+
+/* Bloc « alias possible » en tête du menu. */
+.entag-menu__alias {
+  margin: 6px 0 2px;
+  padding: 7px 8px;
+  background: #fff7ed;
+  border: 1px solid #fdba74;
+  border-radius: 8px;
+  color: #7c2d12;
+  font-size: 12px;
+}
+
+.entag-menu__alias[hidden] { display: none !important; }
+.entag-menu__alias-actions { display: flex; gap: 12px; margin-top: 5px; }
 
 .entag-menu__items { padding: 4px 0; }
 

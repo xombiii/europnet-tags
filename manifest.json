@@ -34,6 +34,7 @@
       ],
       "js": [
         "src/common/store.js",
+        "src/common/alias.js",
         "src/content/content.js"
       ],
       "css": [

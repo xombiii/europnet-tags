@@ -3,8 +3,10 @@
  * la page d'options et le script d'arrière-plan.
  *
  * Stockage (browser.storage.local) :
- *   tags     : { "<pseudo en minuscules>": { nick, tag, note, updatedAt } }
- *   settings : voir DEFAULT_SETTINGS
+ *   tags        : { "<pseudo en minuscules>": { nick, tag, note, updatedAt, aliasOf? } }
+ *   settings    : voir DEFAULT_SETTINGS
+ *   seen        : historique local des pseudos vus { "<pseudo>": { nick, age, city, first, last, count } }
+ *   aliasIgnore : alias écartés { "<candidat>|<pseudo tagué>": horodatage }
  */
 (function (global) {
   'use strict';
@@ -50,6 +52,7 @@
     showInSidebar: true,
     showWhisperFlag: true,
     hideWhispered: false,
+    detectAliases: true,
     badgeSize: 10,
     showNoteTooltip: true,
     contextMenuEnabled: true,
@@ -62,10 +65,11 @@
   }
 
   async function loadAll() {
-    const data = await api.storage.local.get({ tags: {}, settings: {} });
+    const data = await api.storage.local.get({ tags: {}, settings: {}, aliasIgnore: {} });
     return {
       tags: data.tags || {},
-      settings: Object.assign({}, DEFAULT_SETTINGS, data.settings || {})
+      settings: Object.assign({}, DEFAULT_SETTINGS, data.settings || {}),
+      aliasIgnore: data.aliasIgnore || {}
     };
   }
 
@@ -85,7 +89,8 @@
     return data.tags || {};
   }
 
-  async function setTag(nick, tag, note) {
+  /* extra : { aliasOf } — pseudo tagué dont celui-ci est un alias. */
+  async function setTag(nick, tag, note, extra) {
     const key = normalize(nick);
     if (!key) return null;
     const tags = await loadTags();
@@ -96,6 +101,8 @@
       note: note !== undefined ? String(note || '') : (previous.note || ''),
       updatedAt: Date.now()
     };
+    const aliasOf = extra && extra.aliasOf !== undefined ? extra.aliasOf : previous.aliasOf;
+    if (aliasOf) entry.aliasOf = String(aliasOf);
     if (!entry.tag && !entry.note) {
       delete tags[key];
     } else {
@@ -136,10 +143,93 @@
         note,
         updatedAt: Number(value.updatedAt) || Date.now()
       };
+      if (value.aliasOf) clean[key].aliasOf = String(value.aliasOf);
     });
     const tags = mode === 'replace' ? clean : Object.assign(await loadTags(), clean);
     await api.storage.local.set({ tags });
     return Object.keys(clean).length;
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Historique local des pseudos vus (pour la recherche d'alias)       */
+  /* ---------------------------------------------------------------- */
+
+  const SEEN_LIMIT = 5000;
+
+  async function loadSeen() {
+    const data = await api.storage.local.get({ seen: {} });
+    return data.seen || {};
+  }
+
+  /* batch : { "<pseudo en minuscules>": { nick, age?, city? } } */
+  async function mergeSeen(batch) {
+    const keys = Object.keys(batch || {});
+    if (!keys.length) return 0;
+    const data = await api.storage.local.get({ seen: {}, tags: {} });
+    const seen = data.seen || {};
+    const now = Date.now();
+    keys.forEach((key) => {
+      const incoming = batch[key] || {};
+      const previous = seen[key] || {};
+      seen[key] = {
+        nick: incoming.nick || previous.nick || key,
+        age: incoming.age || previous.age || null,
+        city: incoming.city || previous.city || null,
+        first: previous.first || now,
+        last: now,
+        count: (previous.count || 0) + 1
+      };
+    });
+    const all = Object.keys(seen);
+    if (all.length > SEEN_LIMIT) {
+      const tags = data.tags || {};
+      all
+        .filter((key) => !tags[key])
+        .sort((a, b) => (seen[a].last || 0) - (seen[b].last || 0))
+        .slice(0, all.length - SEEN_LIMIT)
+        .forEach((key) => { delete seen[key]; });
+    }
+    await api.storage.local.set({ seen });
+    return keys.length;
+  }
+
+  async function clearSeen() {
+    await api.storage.local.set({ seen: {}, aliasIgnore: {} });
+  }
+
+  async function loadAliasIgnore() {
+    const data = await api.storage.local.get({ aliasIgnore: {} });
+    return data.aliasIgnore || {};
+  }
+
+  /* Pseudo « racine » d'une famille d'alias : on remonte les liens aliasOf. */
+  function aliasRoot(tags, key) {
+    const visited = new Set();
+    let current = key;
+    while (tags[current] && tags[current].aliasOf && !visited.has(current)) {
+      visited.add(current);
+      const next = normalize(tags[current].aliasOf);
+      if (!tags[next]) break;
+      current = next;
+    }
+    return current;
+  }
+
+  /* « Ce n'est pas lui » : vaut pour tout le groupe d'alias du pseudo tagué, sinon
+     le candidat resterait signalé comme alias d'un de ses alias déjà liés. */
+  async function ignoreAlias(candidate, taggedNick) {
+    const data = await api.storage.local.get({ aliasIgnore: {}, tags: {} });
+    const ignore = data.aliasIgnore || {};
+    const tags = data.tags || {};
+    const who = normalize(candidate);
+    const target = normalize(taggedNick);
+    const root = aliasRoot(tags, target);
+    const now = Date.now();
+    ignore[who + '|' + target] = now;
+    Object.keys(tags).forEach((key) => {
+      if (aliasRoot(tags, key) === root) ignore[who + '|' + key] = now;
+    });
+    await api.storage.local.set({ aliasIgnore: ignore });
   }
 
   global.ENTag = {
@@ -156,6 +246,11 @@
     setTag,
     removeTag,
     replaceTags,
-    importTags
+    importTags,
+    loadSeen,
+    mergeSeen,
+    clearSeen,
+    loadAliasIgnore,
+    ignoreAlias
   };
 })(typeof globalThis !== 'undefined' ? globalThis : window);

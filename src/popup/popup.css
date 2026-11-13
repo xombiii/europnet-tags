@@ -97,6 +97,10 @@ input:focus, select:focus, button:focus-visible { outline: 2px solid #38bdf8; ou
 
 .name { font-weight: 600; overflow-wrap: anywhere; }
 .note { width: 100%; margin-top: 3px; padding: 3px 6px; font-size: 12px; color: #475569; }
+.acts { display: flex; align-items: center; gap: 2px; }
+.alias-btn { padding: 3px 7px; font-size: 11px; color: #475569; }
+.alias-btn.is-on { background: #0f172a; border-color: #0f172a; color: #f8fafc; }
+.alias-of { font-weight: 400; font-size: 11px; color: #b45309; }
 .del { border-color: transparent; background: none; color: #94a3b8; padding: 4px 6px; }
 .del:hover { color: #dc2626; background: #fef2f2; }
 
@@ -106,3 +110,30 @@ input:focus, select:focus, button:focus-visible { outline: 2px solid #38bdf8; ou
 .foot button { flex: 1; }
 
 .status { min-height: 16px; margin: 6px 2px 0; color: #2563eb; font-size: 12px; }
+
+/* Panneau « Alias » sous une ligne */
+.alias-panel {
+  padding: 8px 10px 10px;
+  background: #fffbeb;
+  border-bottom: 1px solid #fde68a;
+  font-size: 12px;
+}
+
+.alias-panel p { margin: 0 0 6px; color: #78350f; }
+.alias-panel .alias-empty { color: #64748b; }
+
+.cand {
+  margin-top: 6px;
+  padding: 6px 8px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-left: 3px solid #f59e0b;
+  border-radius: 6px;
+}
+
+.cand--probable { border-left-color: #ef4444; }
+.cand-top { display: flex; justify-content: space-between; gap: 8px; }
+.cand-score { color: #92400e; font-variant-numeric: tabular-nums; }
+.cand-why { margin: 2px 0 5px; color: #475569; }
+.cand-actions { display: flex; gap: 6px; }
+.cand-actions button { padding: 3px 8px; font-size: 11px; }

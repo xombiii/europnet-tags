@@ -9,6 +9,7 @@
  *   node --experimental-default-type=module test/run-tests.mjs
  */
 import { readFileSync } from 'node:fs';
+import vm from 'node:vm';
 import { createRequire } from 'node:module';
 import { execSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -41,7 +42,7 @@ const MOCK_API = `
 (() => {
   const listeners = { storage: [], message: [] };
   const data = { tags: {}, settings: {} };
-  const clone = (v) => JSON.parse(JSON.stringify(v));
+  const clone = (v) => (v === undefined ? undefined : JSON.parse(JSON.stringify(v)));
   globalThis.__entagStore = data;
   globalThis.browser = {
     storage: {
@@ -73,12 +74,51 @@ const MOCK_API = `
 })();
 `;
 
+/* 0. Score d'alias (module pur, sans navigateur) ------------------------------ */
+const aliasCtx = { };
+aliasCtx.globalThis = aliasCtx;
+vm.createContext(aliasCtx);
+vm.runInContext(read('src/common/alias.js'), aliasCtx);
+const EA = aliasCtx.ENAlias;
+const sc = (a, b) => EA.score(a, b);
+
+check('alias : « anais-24 » ~ « anais_24 » signalé',
+  sc({ nick: 'anais-24' }, { nick: 'anais_24' }).score >= EA.THRESHOLD, sc({ nick: 'anais-24' }, { nick: 'anais_24' }));
+check('alias : une lettre en plus + même nombre signalé',
+  sc({ nick: 'anais-24' }, { nick: 'anaiss-24' }).score >= EA.THRESHOLD, sc({ nick: 'anais-24' }, { nick: 'anaiss-24' }));
+check('alias : leet « m4itresse_75 » ~ « maitresse » signalé',
+  sc({ nick: 'maitresse' }, { nick: 'm4itresse_75' }).score >= EA.THRESHOLD && EA.core('m4itresse_75') === 'maitresse');
+check('alias : accents et casse ignorés (« Anaïs_24 » ~ « anais24 »)',
+  sc({ nick: 'Anaïs_24' }, { nick: 'anais24' }).score >= EA.THRESHOLD);
+check('alias : « Sophie_75 » ~ « Sophie_69 » seul : trop faible pour signaler',
+  sc({ nick: 'Sophie_75' }, { nick: 'Sophie_69' }).score < EA.THRESHOLD, sc({ nick: 'Sophie_75' }, { nick: 'Sophie_69' }));
+check('alias : même base + même ville + même âge = probable',
+  sc({ nick: 'Sophie_75', city: 'Paris', age: 22 }, { nick: 'Sophie_69', city: 'paris', age: 22 }).level === 'probable');
+check('alias : même âge + même ville SANS pseudo proche = rien',
+  sc({ nick: 'Soraka', city: 'Paris', age: 22 }, { nick: 'Souestelle', city: 'Paris', age: 22 }).score === 0);
+check('alias : même pseudo (casse différente) = même personne, pas un alias',
+  sc({ nick: 'Louise_Stressee' }, { nick: 'louise_stressee' }).score === 0);
+check('alias : noyau de moins de 4 lettres ignoré (« ana75017 »)',
+  sc({ nick: 'ana75017' }, { nick: 'ana75018' }).score === 0);
+check('alias : âge très différent = malus',
+  sc({ nick: 'Cassandre_24', age: 24 }, { nick: 'Cassandre_24x', age: 45 }).score <
+  sc({ nick: 'Cassandre_24', age: 24 }, { nick: 'Cassandre_24x', age: 24 }).score);
+const cands = EA.findCandidates({ nick: 'anais-24', age: 24, city: 'paris' }, {
+  'anais_24': { nick: 'anais_24', age: 24, city: 'Paris', last: 2 },
+  'anaiss-24': { nick: 'anaiss-24', last: 1 },
+  'leakitty': { nick: 'leakitty', age: 18, city: 'Rennes', last: 3 },
+  'anais-24': { nick: 'anais-24', age: 24, city: 'paris', last: 4 }
+}, (key) => key === 'anaiss-24');
+check('alias : recherche dans l\'historique triée, sans le pseudo lui-même ni les écartés',
+  cands.length === 1 && cands[0].nick === 'anais_24', cands.map((c) => c.nick));
+
 const browser = await chromium.launch();
 const page = await browser.newPage();
 await page.addInitScript(MOCK_API);
 await page.goto(pathToFileURL(join(here, 'fixture.html')).href);
 await page.addStyleTag({ content: read('src/content/content.css') });
 await page.addScriptTag({ content: read('src/common/store.js') });
+await page.addScriptTag({ content: read('src/common/alias.js') });
 await page.addScriptTag({ content: read('src/content/content.js') });
 await page.waitForTimeout(150);
 
@@ -304,6 +344,7 @@ check('mode pipette désactivé après le clic',
 await page.goto(pathToFileURL(join(here, 'fixture-chatteurs.html')).href);
 await page.addStyleTag({ content: read('src/content/content.css') });
 await page.addScriptTag({ content: read('src/common/store.js') });
+await page.addScriptTag({ content: read('src/common/alias.js') });
 await page.addScriptTag({ content: read('src/content/content.js') });
 await page.waitForTimeout(400);
 
@@ -343,6 +384,136 @@ check('chatteurs : le bouton reste affiché quand tout est masqué',
 await chip2.click();
 await page.waitForTimeout(300);
 check('chatteurs : filtre coupé, toutes les lignes reviennent', (await hiddenChatters()).length === 0, await hiddenChatters());
+
+/* 9. Alias des pseudos tagués (liste « Chatteurs » avec âge et ville) --------- */
+await page.evaluate(() => browser.storage.local.set({
+  tags: { 'anais-24': { nick: 'anais-24', tag: 'red', note: 'arnaque', updatedAt: Date.now() } }
+}));
+await page.waitForTimeout(300);
+
+const addChatter = (nick, age, city) => page.evaluate(([n, a, c]) => {
+  const row = document.createElement('div');
+  row.className = 'row';
+  row.innerHTML = '<span class="cell-username"></span><span class="cell"></span><span class="cell-city"></span>';
+  row.children[0].textContent = n;
+  row.children[1].textContent = a;
+  row.children[2].textContent = c;
+  document.getElementById('chatters').appendChild(row);
+}, [nick, age, city]);
+
+const aliasMarkers = () => page.evaluate(() =>
+  Array.from(document.querySelectorAll('.entag-alias')).map((el) => ({
+    nick: el.dataset.entagAliasFor, cls: el.className, title: el.title })));
+
+await addChatter('anais_24', 24, 'Paris');
+await addChatter('anaiss-25', 19, 'Lyon');
+await page.waitForTimeout(500);
+let markers = await aliasMarkers();
+check('alias : « anais_24 » (même âge, même ville) reçoit un anneau rouge',
+  markers.length === 1 && markers[0].nick === 'anais_24' && /entag-alias--red/.test(markers[0].cls), markers);
+check('alias : l\'infobulle cite le pseudo tagué, le score et les raisons',
+  /anais-24/.test(markers[0].title) && /probable/.test(markers[0].title) && /même ville/.test(markers[0].title), markers[0] && markers[0].title);
+check('alias : « anaiss-25 » (âge très différent) et les autres pseudos ne sont pas signalés', markers.length === 1, markers);
+
+/* Menu : bloc « alias » puis application du tag. */
+await page.locator('#chatters .cell-username', { hasText: /^anais_24$/ }).click({ button: 'right' });
+await page.waitForTimeout(150);
+check('alias : le menu affiche le bloc « Alias probable de anais-24 »',
+  (await page.locator('.entag-menu__alias').isVisible()) &&
+  /Alias probable de anais-24/.test(await page.locator('.entag-menu__alias-text').textContent()));
+await page.locator('[data-action="alias-apply"]').click();
+await page.waitForTimeout(400);
+const linked = await page.evaluate(() => globalThis.__entagStore.tags['anais_24']);
+check('alias : le tag de anais-24 est appliqué et le lien enregistré',
+  linked && linked.tag === 'red' && linked.aliasOf === 'anais-24' && /^Alias de anais-24 — arnaque/.test(linked.note), linked);
+check('alias : l\'anneau laisse place à la pastille rouge',
+  (await aliasMarkers()).length === 0 && (await page.locator('#chatters .entag-badge--red').count()) === 2);
+
+/* « Ce n'est pas lui » : le candidat est écarté durablement. */
+await addChatter('anaiis_24', 24, 'paris');
+await page.waitForTimeout(400);
+check('alias : « anaiis_24 » est signalé', (await aliasMarkers()).some((m) => m.nick === 'anaiis_24'), await aliasMarkers());
+await page.locator('#chatters .cell-username', { hasText: /^anaiis_24$/ }).click({ button: 'right' });
+await page.locator('[data-action="alias-ignore"]').click();
+await page.waitForTimeout(500);
+check('alias : écarté, l\'anneau disparaît',
+  !(await aliasMarkers()).some((m) => m.nick === 'anaiis_24'), await aliasMarkers());
+check('alias : l\'alias écarté est mémorisé',
+  await page.evaluate(() => Boolean(globalThis.__entagStore.aliasIgnore && globalThis.__entagStore.aliasIgnore['anaiis_24|anais-24'])));
+
+/* Réglage : détection coupée puis rétablie. */
+await page.evaluate(() => browser.storage.local.set({ settings: { detectAliases: false } }));
+await addChatter('anais__24', 24, 'Paris');
+await page.waitForTimeout(500);
+check('alias : aucun anneau quand la détection est coupée', (await aliasMarkers()).length === 0, await aliasMarkers());
+await page.evaluate(() => browser.storage.local.set({ settings: {} }));
+await page.waitForTimeout(500);
+check('alias : anneau de retour quand la détection est rétablie',
+  (await aliasMarkers()).some((m) => m.nick === 'anais__24'), await aliasMarkers());
+
+/* Historique des pseudos vus (âge / ville lus dans la liste). */
+await page.evaluate(() => Promise.all(globalThis.__entagSend({ type: 'entag:flush-seen' })));
+const seenStore = await page.evaluate(() => globalThis.__entagStore.seen || {});
+check('historique : âge et ville de anais-24 appris depuis la liste',
+  seenStore['anais-24'] && seenStore['anais-24'].age === 24 && seenStore['anais-24'].city === 'paris', seenStore['anais-24']);
+check('historique : ville « Massy » de Soraka apprise', seenStore['soraka'] && seenStore['soraka'].city === 'Massy', seenStore['soraka']);
+check('historique : ville à plusieurs mots (« Avec le loups »)', seenStore['signit'] && seenStore['signit'].city === 'Avec le loups', seenStore['signit']);
+
+/* 10. Popup : panneau « Alias » sous un pseudo tagué ------------------------- */
+const popup = await browser.newPage();
+await popup.addInitScript(MOCK_API);
+await popup.addInitScript(`Object.assign(globalThis.__entagStore, {
+  tags: { 'anais-24': { nick: 'anais-24', tag: 'red', note: 'arnaque', updatedAt: 1 } },
+  seen: {
+    'anais-24': { nick: 'anais-24', age: 24, city: 'paris', last: ${Date.now()} },
+    'anais_24': { nick: 'anais_24', age: 24, city: 'Paris', last: ${Date.now() - 3600000} },
+    'anaiss-24': { nick: 'anaiss-24', last: ${Date.now() - 86400000 * 3} },
+    'leakitty': { nick: 'leakitty', age: 18, city: 'Rennes', last: ${Date.now()} }
+  }
+});`);
+await popup.goto(pathToFileURL(join(root, 'src/popup/popup.html')).href);
+await popup.waitForTimeout(250);
+await popup.locator('[data-action="alias"]').click();
+await popup.waitForTimeout(150);
+const candNicks = await popup.locator('.cand').evaluateAll((els) => els.map((e) => e.dataset.nick));
+check('popup : le panneau liste les alias possibles, le plus probable d\'abord',
+  candNicks.length === 2 && candNicks[0] === 'anais_24' && candNicks[1] === 'anaiss-24', candNicks);
+check('popup : profil connu affiché (24 ans · paris)', /24 ans · paris/.test(await popup.locator('.alias-head').textContent()));
+check('popup : score, raisons et dernière vue affichés',
+  /\d+ %/.test(await popup.locator('.cand').first().textContent()) && /vu il y a/.test(await popup.locator('.cand').first().textContent()));
+await popup.locator('.cand[data-nick="anais_24"] [data-action="link"]').click();
+await popup.waitForTimeout(250);
+const popupLinked = await popup.evaluate(() => globalThis.__entagStore.tags['anais_24']);
+check('popup : « Lier » crée l\'alias avec le même tag',
+  popupLinked && popupLinked.tag === 'red' && popupLinked.aliasOf === 'anais-24', popupLinked);
+check('popup : la ligne de l\'alias indique « alias de anais-24 »', /alias de anais-24/.test(await popup.locator('.list').textContent()));
+check('popup : l\'alias lié n\'est plus proposé comme candidat',
+  (await popup.locator('.cand').evaluateAll((els) => els.map((e) => e.dataset.nick))).join() === 'anaiss-24');
+await popup.locator('.cand[data-nick="anaiss-24"] [data-action="ignore"]').click();
+await popup.waitForTimeout(250);
+check('popup : « Ce n\'est pas lui » retire le candidat',
+  (await popup.locator('.cand').count()) === 0 &&
+  await popup.evaluate(() => Boolean(globalThis.__entagStore.aliasIgnore['anaiss-24|anais-24'])));
+
+/* 11. Ordre d'apparition : le candidat est listé AVANT le pseudo tagué ------- */
+await page.goto(pathToFileURL(join(here, 'fixture-chatteurs.html')).href);
+await page.evaluate(() => {
+  globalThis.__entagStore.tags = { 'anais-24': { nick: 'anais-24', tag: 'yellow', note: '', updatedAt: 1 } };
+  const row = document.createElement('div');
+  row.className = 'row';
+  row.innerHTML = '<span class="cell-username">anais_24</span><span class="cell">24</span><span class="cell-city">Paris</span>';
+  document.getElementById('chatters').insertBefore(row, document.getElementById('chatters').firstChild);
+});
+await page.addStyleTag({ content: read('src/content/content.css') });
+await page.addScriptTag({ content: read('src/common/store.js') });
+await page.addScriptTag({ content: read('src/common/alias.js') });
+await page.addScriptTag({ content: read('src/content/content.js') });
+await page.waitForTimeout(900);
+const early = await aliasMarkers();
+check('alias : détecté même si le candidat est listé avant le pseudo tagué',
+  early.length === 1 && early[0].nick === 'anais_24' && /entag-alias--yellow/.test(early[0].cls), early);
+check('alias : le score tient compte de l\'âge et de la ville du pseudo tagué',
+  /même ville/.test(early[0] && early[0].title) && /même âge/.test(early[0] && early[0].title), early[0] && early[0].title);
 
 await browser.close();
 

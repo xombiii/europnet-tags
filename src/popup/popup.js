@@ -11,6 +11,9 @@
   const statusEl = $('status');
 
   let tags = {};
+  let seen = {};
+  let ignored = {};
+  const openPanels = new Set();
   let filter = 'all';
   let query = '';
   let statusTimer = 0;
@@ -31,6 +34,112 @@
         return haystack.includes(query);
       })
       .sort((a, b) => a.nick.localeCompare(b.nick, 'fr', { sensitivity: 'base' }));
+  }
+
+  function ago(timestamp) {
+    if (!timestamp) return '';
+    const minutes = Math.max(0, Math.round((Date.now() - timestamp) / 60000));
+    if (minutes < 2) return "à l'instant";
+    if (minutes < 60) return 'il y a ' + minutes + ' min';
+    const hours = Math.round(minutes / 60);
+    if (hours < 48) return 'il y a ' + hours + ' h';
+    return 'il y a ' + Math.round(hours / 24) + ' j';
+  }
+
+  function profileText(info) {
+    if (!info) return '';
+    const parts = [];
+    if (info.age) parts.push(info.age + ' ans');
+    if (info.city) parts.push(info.city);
+    return parts.join(' · ');
+  }
+
+  /* Panneau « Alias » d'un pseudo tagué : candidats tirés de l'historique des
+     pseudos vus (score, raisons), alias déjà liés. */
+  function buildAliasPanel(entry) {
+    const li = document.createElement('li');
+    li.className = 'alias-panel';
+    li.dataset.for = entry.key;
+
+    const info = seen[entry.key];
+    const head = document.createElement('p');
+    head.className = 'alias-head';
+    const known = profileText(info);
+    head.textContent = known
+      ? 'Profil connu de ' + entry.nick + ' : ' + known + '.'
+      : 'Âge et ville de ' + entry.nick + ' inconnus (ils sont lus dans la liste des chatteurs quand il est connecté).';
+    li.appendChild(head);
+
+    const linked = Object.keys(tags)
+      .map((key) => tags[key])
+      .filter((t) => t.aliasOf && S.normalize(t.aliasOf) === entry.key)
+      .map((t) => t.nick);
+    if (linked.length) {
+      const p = document.createElement('p');
+      p.className = 'alias-linked';
+      p.textContent = 'Alias déjà liés : ' + linked.join(', ');
+      li.appendChild(p);
+    }
+
+    if (!Object.keys(seen).length) {
+      const p = document.createElement('p');
+      p.className = 'alias-empty';
+      p.textContent = "Aucun pseudo enregistré pour l'instant : ouvre le tchat, l'extension apprend les pseudos qu'elle voit.";
+      li.appendChild(p);
+      return li;
+    }
+
+    const candidates = globalThis.ENAlias.findCandidates(
+      { nick: entry.nick, age: info && info.age, city: info && info.city },
+      seen,
+      (key) => key === entry.key || Boolean(tags[key]) || Boolean(ignored[key + '|' + entry.key]),
+      8
+    );
+
+    if (!candidates.length) {
+      const p = document.createElement('p');
+      p.className = 'alias-empty';
+      p.textContent = 'Aucun alias probable parmi les ' + Object.keys(seen).length + ' pseudos vus.';
+      li.appendChild(p);
+      return li;
+    }
+
+    candidates.forEach((cand) => {
+      const item = document.createElement('div');
+      item.className = 'cand cand--' + cand.level;
+      item.dataset.key = cand.key;
+      item.dataset.nick = cand.nick;
+
+      const top = document.createElement('div');
+      top.className = 'cand-top';
+      const nick = document.createElement('b');
+      nick.textContent = cand.nick;
+      const score = document.createElement('span');
+      score.className = 'cand-score';
+      score.textContent = cand.score + ' % · ' + (cand.level === 'probable' ? 'probable' : 'possible');
+      top.append(nick, score);
+
+      const why = document.createElement('div');
+      why.className = 'cand-why';
+      const meta = [profileText(cand), cand.last ? 'vu ' + ago(cand.last) : ''].filter(Boolean).join(' · ');
+      why.textContent = cand.reasons.join(', ') + (meta ? ' — ' + meta : '');
+
+      const actions = document.createElement('div');
+      actions.className = 'cand-actions';
+      const link = document.createElement('button');
+      link.type = 'button';
+      link.dataset.action = 'link';
+      link.textContent = 'Lier (même tag)';
+      const ignore = document.createElement('button');
+      ignore.type = 'button';
+      ignore.dataset.action = 'ignore';
+      ignore.textContent = "Ce n'est pas lui";
+      actions.append(link, ignore);
+
+      item.append(top, why, actions);
+      li.appendChild(item);
+    });
+    return li;
   }
 
   function renderCounts() {
@@ -75,6 +184,12 @@
       const name = document.createElement('div');
       name.className = 'name';
       name.textContent = entry.nick;
+      if (entry.aliasOf) {
+        const from = document.createElement('span');
+        from.className = 'alias-of';
+        from.textContent = ' ↳ alias de ' + entry.aliasOf;
+        name.appendChild(from);
+      }
       const note = document.createElement('input');
       note.className = 'note';
       note.type = 'text';
@@ -90,14 +205,28 @@
       del.textContent = '✕';
       del.title = 'Supprimer ' + entry.nick;
 
-      li.append(dots, main, del);
+      const acts = document.createElement('div');
+      acts.className = 'acts';
+      const alias = document.createElement('button');
+      alias.type = 'button';
+      alias.className = 'alias-btn' + (openPanels.has(entry.key) ? ' is-on' : '');
+      alias.dataset.action = 'alias';
+      alias.textContent = 'Alias';
+      alias.title = 'Chercher les alias de ' + entry.nick;
+      alias.setAttribute('aria-expanded', String(openPanels.has(entry.key)));
+      acts.append(alias, del);
+
+      li.append(dots, main, acts);
       fragment.appendChild(li);
+      if (openPanels.has(entry.key)) fragment.appendChild(buildAliasPanel(entry));
     });
     listEl.appendChild(fragment);
   }
 
   async function reload() {
     tags = await S.loadTags();
+    seen = await S.loadSeen();
+    ignored = await S.loadAliasIgnore();
     render();
   }
 
@@ -106,10 +235,39 @@
   /* -------------------------------------------------------------- */
 
   listEl.addEventListener('click', async (event) => {
+    const cand = event.target.closest('.cand');
+    if (cand) {
+      const panel = cand.closest('.alias-panel');
+      const owner = panel && tags[panel.dataset.for];
+      const action = event.target.closest('button') && event.target.closest('button').dataset.action;
+      if (!owner || !action) return;
+      if (action === 'link') {
+        if (!owner.tag) {
+          status('Donne d\'abord un tag à ' + owner.nick);
+          return;
+        }
+        const note = 'Alias de ' + owner.nick + (owner.note ? ' — ' + owner.note : '');
+        await S.setTag(cand.dataset.nick, owner.tag, note, { aliasOf: owner.nick });
+        status(cand.dataset.nick + ' lié à ' + owner.nick);
+      } else if (action === 'ignore') {
+        await S.ignoreAlias(cand.dataset.nick, owner.nick);
+        status('Alias écarté');
+      }
+      await reload();
+      return;
+    }
+
     const row = event.target.closest('.row');
     if (!row) return;
     const entry = tags[row.dataset.key];
     if (!entry) return;
+
+    if (event.target.closest('[data-action="alias"]')) {
+      if (openPanels.has(row.dataset.key)) openPanels.delete(row.dataset.key);
+      else openPanels.add(row.dataset.key);
+      render();
+      return;
+    }
 
     const dot = event.target.closest('.dot');
     if (dot) {
@@ -208,10 +366,11 @@
   });
 
   api.storage.onChanged.addListener((changes, area) => {
-    if (area === 'local' && changes.tags) {
-      tags = changes.tags.newValue || {};
-      render();
-    }
+    if (area !== 'local') return;
+    if (changes.tags) tags = changes.tags.newValue || {};
+    if (changes.seen) seen = changes.seen.newValue || {};
+    if (changes.aliasIgnore) ignored = changes.aliasIgnore.newValue || {};
+    if (changes.tags || ((changes.seen || changes.aliasIgnore) && openPanels.size)) render();
   });
 
   reload();

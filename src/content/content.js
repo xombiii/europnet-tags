@@ -9,7 +9,9 @@
  * 5. pose un flag « whisp » (bulle bleue) dans la liste des membres sur les
  *    pseudos avec qui une conversation privée est ouverte dans la barre de
  *    gauche (rubrique MESSAGES) ;
- * 6. propose un bouton pour masquer ces pseudos de la liste des membres.
+ * 6. propose un bouton pour masquer ces pseudos de la liste des membres ;
+ * 7. repère les alias probables des pseudos tagués (pseudo proche, même âge /
+ *    même ville lus dans la liste) et propose de leur appliquer le même tag.
  */
 (function () {
   'use strict';
@@ -17,7 +19,7 @@
   const S = globalThis.ENTag;
   const api = S.api;
 
-  const OWN_CLASSES = '.entag-badge, .entag-whisper, .entag-filter, .entag-menu, .entag-toast';
+  const OWN_CLASSES = '.entag-badge, .entag-alias, .entag-whisper, .entag-filter, .entag-menu, .entag-toast';
   /* Liste des membres (à droite). */
   const NICKLIST_SCOPE = '[class*="nicklist" i], [class*="memberlist" i], [class*="userlist" i], ' +
     '[class*="member-list" i], [class*="user-list" i]';
@@ -29,13 +31,25 @@
   /* Symboles de genre / variantes emoji collés au pseudo dans EuropNet. */
   const DECORATION_RE = /[\u2640\u2642\u26A5\u26A7\u200B-\u200D\uFE0E\uFE0F\u00A0]/g;
 
-  let state = { tags: {}, settings: Object.assign({}, S.DEFAULT_SETTINGS) };
+  const A = globalThis.ENAlias;
+  /* Ordre des repères collés à la fin d'un pseudo. */
+  const OWN_ORDER = ['entag-badge', 'entag-alias', 'entag-whisper'];
+  const SEEN_FLUSH_MS = 8000;
+  const SEEN_REFRESH_MS = 10 * 60 * 1000;
+
+  let state = { tags: {}, settings: Object.assign({}, S.DEFAULT_SETTINGS), aliasIgnore: {} };
   let selector = '';
   let ready = false;
   let observer = null;
   let scanScheduled = false;
   let pickMode = false;
   let whisperNicks = new Set();
+  /* Historique des pseudos vus : clé → { nick, age, city, sent } */
+  const seenKnown = new Map();
+  let seenQueue = {};
+  let seenTimer = 0;
+  const aliasCache = new Map();
+  const profileCache = new WeakMap();
 
   /* ------------------------------------------------------------------ */
   /* Sélecteurs                                                          */
@@ -153,17 +167,26 @@
     return existingOwn(el, 'entag-whisper');
   }
 
-  /* Ordre fixe à la fin du pseudo : pastille de fiabilité, puis flag whisp. */
-  function attachBadge(el, node) {
-    const flag = existingFlag(el);
-    if (VOID_TAGS.has(el.tagName)) el.insertAdjacentElement('afterend', node);
-    else if (flag) el.insertBefore(node, flag);
-    else el.appendChild(node);
+  function rankOf(node) {
+    for (let i = 0; i < OWN_ORDER.length; i += 1) {
+      if (node.classList.contains(OWN_ORDER[i])) return i;
+    }
+    return OWN_ORDER.length;
   }
 
-  function attachFlag(el, node) {
-    const badge = existingBadge(el);
-    if (VOID_TAGS.has(el.tagName)) (badge || el).insertAdjacentElement('afterend', node);
+  /* Ordre fixe à la fin du pseudo : pastille de fiabilité, alias, flag whisp. */
+  function attachOwn(el, node) {
+    const rank = rankOf(node);
+    if (VOID_TAGS.has(el.tagName)) {
+      let anchor = el;
+      for (let n = el.nextElementSibling; n && isOurNode(n) && rankOf(n) < rank; n = n.nextElementSibling) {
+        anchor = n;
+      }
+      anchor.insertAdjacentElement('afterend', node);
+      return;
+    }
+    const after = Array.from(el.children).find((child) => isOurNode(child) && rankOf(child) > rank);
+    if (after) el.insertBefore(node, after);
     else el.appendChild(node);
   }
 
@@ -190,7 +213,7 @@
     node.title = tooltipFor(entry);
     node.style.setProperty('--entag-size', (state.settings.badgeSize || 10) + 'px');
 
-    if (!badge) attachBadge(el, node);
+    if (!badge) attachOwn(el, node);
   }
 
   /* Le flag whisp apparaît sur tout pseudo hors du salon (liste des membres,
@@ -214,7 +237,7 @@
     node.setAttribute('aria-label', text);
     node.title = text;
 
-    if (!flag) attachFlag(el, node);
+    if (!flag) attachOwn(el, node);
   }
 
   function decorate(el) {
@@ -224,12 +247,14 @@
 
     const badge = existingBadge(el);
     const flag = existingFlag(el);
+    const marker = existingOwn(el, 'entag-alias');
 
     /* Un conteneur (ex. .kiwi-nicklist-user) peut matcher en même temps que le
        pseudo qu'il contient : seul l'élément le plus interne est décoré. */
     if (selector && el.querySelector(selector)) {
       if (badge) badge.remove();
       if (flag) flag.remove();
+      if (marker) marker.remove();
       showRowOf(el);
       return;
     }
@@ -239,6 +264,7 @@
     if (!isValidNick(nick)) {
       if (badge) badge.remove();
       if (flag) flag.remove();
+      if (marker) marker.remove();
       delete el.dataset.entagWhispered;
       showRowOf(el);
       return;
@@ -252,6 +278,135 @@
     syncBadge(el, nick, zone, badge);
     syncWhisperFlag(el, nick, flag, target);
     syncWhisperRow(el, target);
+
+    const inList = zone !== 'message' && !el.closest(STATE_SCOPE);
+    noteSeen(nick, inList ? profileOf(el, nick) : null);
+    syncAliasMarker(el, nick, marker);
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Alias probables des pseudos tagués                                   */
+  /* ------------------------------------------------------------------ */
+
+  /* Âge et ville lus sur la ligne de la liste (« Signit  18  Avec le loups ») :
+     on retire le pseudo, le premier nombre de 13 à 99 est l'âge, le reste la ville.
+     Rien n'est supposé sur les classes CSS du site ; si la ligne n'a pas cette
+     forme, on ne renvoie rien. */
+  function profileOf(el, nick) {
+    const cached = profileCache.get(el);
+    if (cached && cached.nick === nick) return cached.profile;
+
+    let profile = null;
+    const row = rowOf(el, false);
+    if (row && row !== el) {
+      /* Morceaux de texte de la ligne hors pseudo, séparés par une espace :
+         `textContent` collerait les cellules (« Signit18Avec le loups »). */
+      const pieces = [];
+      const walker = document.createTreeWalker(row, NodeFilter.SHOW_TEXT);
+      while (walker.nextNode()) {
+        const node = walker.currentNode;
+        if (el.contains(node) || (node.parentElement && node.parentElement.closest(OWN_CLASSES))) continue;
+        const piece = node.textContent.replace(DECORATION_RE, ' ').trim();
+        if (piece) pieces.push(piece);
+      }
+      const text = pieces.join(' ')
+        .replace(/(^|\s)[@%+~&!]+(?=\s|$)/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      const match = /(?:^|\s)(1[3-9]|[2-9]\d)(?=\s|$)/.exec(text);
+      if (match) {
+        const city = text.slice(match.index + match[0].length).trim().slice(0, 40);
+        profile = { age: Number(match[1]), city: city || null };
+      }
+    }
+    profileCache.set(el, { nick, profile });
+    return profile;
+  }
+
+  function flushSeen() {
+    clearTimeout(seenTimer);
+    seenTimer = 0;
+    const batch = seenQueue;
+    seenQueue = {};
+    if (!Object.keys(batch).length) return Promise.resolve(0);
+    return S.mergeSeen(batch).catch(() => 0);
+  }
+
+  function noteSeen(nick, profile) {
+    if (state.settings.detectAliases === false) return;
+    const key = nick.toLowerCase();
+    const known = seenKnown.get(key);
+    const age = (profile && profile.age) || null;
+    const city = (profile && profile.city) || null;
+    const changed = !known ||
+      (age && known.age !== age) ||
+      (city && known.city !== city) ||
+      Date.now() - known.sent > SEEN_REFRESH_MS;
+    if (!changed) return;
+
+    seenKnown.set(key, {
+      nick,
+      age: age || (known && known.age) || null,
+      city: city || (known && known.city) || null,
+      sent: Date.now()
+    });
+    seenQueue[key] = { nick, age, city };
+    aliasCache.delete(key);
+    /* Le profil d'un pseudo tagué vient d'être appris : les scores déjà calculés
+       pour les autres pseudos sont à refaire (un seul rebalayage, pas de boucle :
+       le profil est alors connu). */
+    if (state.tags[key] && ((age && (!known || known.age !== age)) || (city && (!known || known.city !== city)))) {
+      aliasCache.clear();
+      scheduleFullScan();
+    }
+    if (!seenTimer) seenTimer = setTimeout(flushSeen, SEEN_FLUSH_MS);
+  }
+
+  /* Meilleur alias probable de `nick` parmi les pseudos tagués (ou null). */
+  function aliasFor(nick) {
+    if (!A || state.settings.detectAliases === false) return null;
+    const key = nick.toLowerCase();
+    if (state.tags[key]) return null;
+    if (aliasCache.has(key)) return aliasCache.get(key);
+
+    const known = seenKnown.get(key) || {};
+    const candidate = { nick, age: known.age, city: known.city };
+    let best = null;
+    Object.keys(state.tags).forEach((tagKey) => {
+      const tagged = state.tags[tagKey];
+      if (!tagged || !tagged.tag) return;
+      if (state.aliasIgnore[key + '|' + tagKey]) return;
+      const info = seenKnown.get(tagKey) || {};
+      const result = A.score({ nick: tagged.nick, age: info.age, city: info.city }, candidate);
+      if (result.score >= A.THRESHOLD && (!best || result.score > best.score)) {
+        best = Object.assign({ of: tagged }, result);
+      }
+    });
+    aliasCache.set(key, best);
+    return best;
+  }
+
+  function aliasTitle(info) {
+    const meta = S.TAGS[info.of.tag];
+    return 'Alias ' + (info.level === 'probable' ? 'probable' : 'possible') + ' de ' + info.of.nick +
+      (meta ? ' (' + meta.label + ')' : '') + ' — ' + info.score + ' %\n' + info.reasons.join('\n') +
+      '\nClic pour appliquer son tag ou écarter.';
+  }
+
+  function syncAliasMarker(el, nick, marker) {
+    const info = aliasFor(nick);
+    if (!info) {
+      if (marker) marker.remove();
+      return;
+    }
+    const node = marker || document.createElement('span');
+    node.className = 'entag-alias entag-alias--' + info.of.tag;
+    node.dataset.entagAliasFor = nick;
+    node.setAttribute('role', 'img');
+    node.setAttribute('aria-label', aliasTitle(info));
+    node.title = aliasTitle(info);
+    node.style.setProperty('--entag-size', (state.settings.badgeSize || 10) + 'px');
+    if (!marker) attachOwn(el, node);
   }
 
   /* ------------------------------------------------------------------ */
@@ -285,8 +440,8 @@
      tant que le parent ne contient que ce pseudo, sans jamais englober un champ
      de saisie (filtres, recherche). Renvoie null si le pseudo n'est pas dans une
      liste (fiche isolée, fenêtre de profil...) : on ne masque alors rien. */
-  function rowOf(el) {
-    const base = el.getBoundingClientRect();
+  function rowOf(el, useGeometry) {
+    const base = useGeometry === false ? { height: 0 } : el.getBoundingClientRect();
     let row = el;
     for (let i = 0; i < 6; i += 1) {
       const parent = row.parentElement;
@@ -490,7 +645,7 @@
   function isOurNode(node) {
     return node.nodeType === Node.ELEMENT_NODE &&
       (node.classList.contains('entag-badge') || node.classList.contains('entag-whisper') ||
-       node.classList.contains('entag-filter') || node.classList.contains('entag-menu') || node.classList.contains('entag-toast'));
+       node.classList.contains('entag-alias') || node.classList.contains('entag-filter') || node.classList.contains('entag-menu') || node.classList.contains('entag-toast'));
   }
 
   /* Mutation qui n'ajoute / retire que nos propres éléments : on l'ignore. */
@@ -564,6 +719,13 @@
     el.hidden = true;
     el.innerHTML =
       '<div class="entag-menu__header"><span class="entag-menu__nick"></span></div>' +
+      '<div class="entag-menu__alias" hidden>' +
+        '<div class="entag-menu__alias-text"></div>' +
+        '<div class="entag-menu__alias-actions">' +
+          '<button type="button" class="entag-menu__link" data-action="alias-apply">Appliquer son tag</button>' +
+          '<button type="button" class="entag-menu__link" data-action="alias-ignore">Ce n\'est pas lui</button>' +
+        '</div>' +
+      '</div>' +
       '<div class="entag-menu__items">' +
         S.TAG_ORDER.map((id) =>
           '<button type="button" class="entag-menu__item" data-tag="' + id + '">' +
@@ -608,6 +770,15 @@
     const entry = state.tags[nick.toLowerCase()] || {};
     el.querySelector('.entag-menu__nick').textContent = nick;
     el.querySelector('.entag-menu__input').value = entry.note || '';
+    const alias = aliasFor(nick);
+    const aliasBox = el.querySelector('.entag-menu__alias');
+    aliasBox.hidden = !alias;
+    if (alias) {
+      const meta = S.TAGS[alias.of.tag];
+      el.querySelector('.entag-menu__alias-text').textContent =
+        'Alias ' + (alias.level === 'probable' ? 'probable' : 'possible') + ' de ' + alias.of.nick +
+        (meta ? ' (' + meta.label + ')' : '') + ' — ' + alias.score + ' % : ' + alias.reasons.join(', ') + '.';
+    }
     el.querySelectorAll('[data-tag]').forEach((btn) => {
       btn.classList.toggle('is-active', entry.tag === btn.dataset.tag);
     });
@@ -640,6 +811,26 @@
     closeMenu();
   }
 
+  async function applyAlias() {
+    const nick = menuNick;
+    const info = nick && aliasFor(nick);
+    if (!info) return closeMenu();
+    const typed = menu.querySelector('.entag-menu__input').value.trim();
+    const note = 'Alias de ' + info.of.nick + (typed ? ' — ' + typed : (info.of.note ? ' — ' + info.of.note : ''));
+    await S.setTag(nick, info.of.tag, note, { aliasOf: info.of.nick });
+    toast(nick + ' : même tag que ' + info.of.nick + ' (' + S.TAGS[info.of.tag].label + ')');
+    closeMenu();
+  }
+
+  async function ignoreAliasFor() {
+    const nick = menuNick;
+    const info = nick && aliasFor(nick);
+    if (!info) return closeMenu();
+    await S.ignoreAlias(nick, info.of.nick);
+    toast(nick + ' : alias écarté');
+    closeMenu();
+  }
+
   async function saveNote() {
     if (!menuNick) return;
     const note = menu.querySelector('.entag-menu__input').value;
@@ -657,6 +848,8 @@
     if (button.dataset.tag) return void applyTag(button.dataset.tag);
     const action = button.dataset.action;
     if (action === 'clear') return void clearTag();
+    if (action === 'alias-apply') return void applyAlias();
+    if (action === 'alias-ignore') return void ignoreAliasFor();
     if (action === 'close') return closeMenu();
     if (action === 'copy') {
       const nick = menuNick;
@@ -670,7 +863,7 @@
 
   function nickElementFrom(target) {
     if (!(target instanceof Element)) return null;
-    const badge = target.closest('.entag-badge');
+    const badge = target.closest('.entag-badge, .entag-alias');
     if (badge) {
       const owner = badge.parentElement;
       if (owner && owner.dataset.entagNick) return owner;
@@ -696,11 +889,11 @@
   }
 
   function onBadgeClick(event) {
-    const badge = event.target.closest('.entag-badge');
+    const badge = event.target.closest('.entag-badge, .entag-alias');
     if (!badge) return;
     event.preventDefault();
     event.stopPropagation();
-    openMenu(badge.dataset.entagFor, event.clientX, event.clientY);
+    openMenu(badge.dataset.entagFor || badge.dataset.entagAliasFor, event.clientX, event.clientY);
   }
 
   /* ------------------------------------------------------------------ */
@@ -788,12 +981,26 @@
 
   api.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local') return;
-    if (changes.tags) state.tags = changes.tags.newValue || {};
+    /* L'historique des pseudos vus (clé « seen ») change souvent : il ne
+       déclenche aucun rebalayage de la page. */
+    let rescan = false;
+    if (changes.tags) {
+      state.tags = changes.tags.newValue || {};
+      aliasCache.clear();
+      rescan = true;
+    }
     if (changes.settings) {
       state.settings = Object.assign({}, S.DEFAULT_SETTINGS, changes.settings.newValue || {});
       buildSelector();
+      aliasCache.clear();
+      rescan = true;
     }
-    scheduleFullScan();
+    if (changes.aliasIgnore) {
+      state.aliasIgnore = changes.aliasIgnore.newValue || {};
+      aliasCache.clear();
+      rescan = true;
+    }
+    if (rescan) scheduleFullScan();
   });
 
   api.runtime.onMessage.addListener((message) => {
@@ -805,6 +1012,9 @@
       setPickMode(true);
       return Promise.resolve({ ok: true });
     }
+    if (message.type === 'entag:flush-seen') {
+      return flushSeen().then((count) => ({ ok: true, count }));
+    }
     if (message.type === 'entag:rescan') {
       buildSelector();
       scan(document.body);
@@ -815,6 +1025,11 @@
 
   async function init() {
     state = await S.loadAll();
+    const seen = await S.loadSeen();
+    Object.keys(seen).forEach((key) => {
+      const info = seen[key] || {};
+      seenKnown.set(key, { nick: info.nick || key, age: info.age || null, city: info.city || null, sent: info.last || 0 });
+    });
     buildSelector();
     ready = true;
     document.addEventListener('contextmenu', onContextMenu, true);
@@ -827,6 +1042,7 @@
       scheduleChipUpdate();
     }, true);
     window.addEventListener('resize', scheduleChipUpdate);
+    window.addEventListener('pagehide', () => { void flushSeen(); });
     startObserver();
     scan(document.body);
   }
