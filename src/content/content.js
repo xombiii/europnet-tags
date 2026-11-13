@@ -11,7 +11,9 @@
  *    gauche (rubrique MESSAGES) ;
  * 6. propose un bouton pour masquer ces pseudos de la liste des membres ;
  * 7. repère les alias probables des pseudos tagués (pseudo proche, même âge /
- *    même ville lus dans la liste) et propose de leur appliquer le même tag.
+ *    même ville lus dans la liste) et propose de leur appliquer le même tag ;
+ * 8. fait briller (glow) dans la liste de droite les pseudos dont une conversation
+ *    privée contient des messages non lus, et les fait remonter en haut.
  */
 (function () {
   'use strict';
@@ -34,6 +36,9 @@
   const A = globalThis.ENAlias;
   /* Ordre des repères collés à la fin d'un pseudo. */
   const OWN_ORDER = ['entag-badge', 'entag-alias', 'entag-whisper'];
+  /* Signaux d'une conversation non lue dans la barre de gauche. */
+  const UNREAD_CLASS_RE = /unread|highlight|activity|notif|alert|mention|blink|flash/i;
+  const CURRENT_CLASS_RE = /(?:^|[\s_-])(?:active|selected|current)(?:$|[\s_-])/i;
   const SEEN_FLUSH_MS = 8000;
   const SEEN_REFRESH_MS = 10 * 60 * 1000;
 
@@ -44,6 +49,8 @@
   let scanScheduled = false;
   let pickMode = false;
   let whisperNicks = new Set();
+  /* Messages privés non lus : pseudo en minuscules → nombre (>= 1). */
+  let whisperUnread = new Map();
   /* Historique des pseudos vus : clé → { nick, age, city, sent } */
   const seenKnown = new Map();
   let seenQueue = {};
@@ -223,15 +230,17 @@
     return whisperNicks.has(nick.toLowerCase());
   }
 
-  function syncWhisperFlag(el, nick, flag, target) {
+  function syncWhisperFlag(el, nick, flag, target, unread) {
     if (!target || state.settings.showWhisperFlag === false) {
       if (flag) flag.remove();
       return;
     }
 
     const node = flag || document.createElement('span');
-    const text = 'Conversation privée ouverte avec ' + nick;
-    node.className = 'entag-whisper';
+    const text = unread
+      ? 'Message privé non lu de ' + nick + (unread > 1 ? ' (' + unread + ')' : '')
+      : 'Conversation privée ouverte avec ' + nick;
+    node.className = 'entag-whisper' + (unread ? ' entag-whisper--unread' : '');
     node.dataset.entagWhisperFor = nick;
     node.setAttribute('role', 'img');
     node.setAttribute('aria-label', text);
@@ -271,13 +280,14 @@
     }
 
     el.dataset.entagNick = nick;
-    el.classList.add('entag-nick');
+    if (!el.classList.contains('entag-nick')) el.classList.add('entag-nick');
 
     const zone = zoneOf(el);
     const target = isWhisperTarget(el, nick, zone);
+    const unread = target ? (whisperUnread.get(nick.toLowerCase()) || 0) : 0;
     syncBadge(el, nick, zone, badge);
-    syncWhisperFlag(el, nick, flag, target);
-    syncWhisperRow(el, target);
+    syncWhisperFlag(el, nick, flag, target, unread);
+    syncWhisperRow(el, target, unread);
 
     const inList = zone !== 'message' && !el.closest(STATE_SCOPE);
     noteSeen(nick, inList ? profileOf(el, nick) : null);
@@ -414,6 +424,8 @@
   /* ------------------------------------------------------------------ */
 
   const FLAGGED = '.entag-nick[data-entag-whispered]';
+  /* Le bouton ne compte que ceux qu'il peut masquer (pas ceux qui ont écrit). */
+  const FLAGGED_HIDEABLE = '.entag-nick[data-entag-whispered="1"]';
   const ROW_STOP_TAGS = /^(UL|OL|NAV|MAIN|ASIDE|TABLE|TBODY|THEAD|SECTION)$/;
 
   /* Nombre de pseudos différents dans un élément (on s'arrête à `limit`). */
@@ -436,6 +448,20 @@
     return nicks.size;
   }
 
+  function containsChannel(root) {
+    if (!selector) return false;
+    let list;
+    try {
+      list = root.querySelectorAll(selector);
+    } catch (err) {
+      return false;
+    }
+    for (const node of list) {
+      if (!node.closest(OWN_CLASSES) && looksLikeChannel(node)) return true;
+    }
+    return false;
+  }
+
   /* Ligne de la liste qui contient ce pseudo (celle qu'on masque) : on remonte
      tant que le parent ne contient que ce pseudo, sans jamais englober un champ
      de saisie (filtres, recherche). Renvoie null si le pseudo n'est pas dans une
@@ -447,6 +473,7 @@
       const parent = row.parentElement;
       if (!parent || parent === document.body || ROW_STOP_TAGS.test(parent.tagName)) break;
       if (countNicks(parent, 2) > 1) break;
+      if (containsChannel(parent)) break;
       if (parent.querySelector('input, textarea, select')) break;
       /* Une ligne reste de la hauteur d'un pseudo : au-delà, c'est un bloc. */
       if (base.height > 0 && parent.getBoundingClientRect().height > Math.max(60, base.height * 4)) break;
@@ -461,11 +488,54 @@
     if (row) row.removeAttribute('data-entag-hidden');
   }
 
-  function syncWhisperRow(el, target) {
-    if (target) el.dataset.entagWhispered = '1';
+  /* Libère le conteneur d'une liste quand plus aucune ligne n'y est remontée. */
+  function releaseBox(box) {
+    if (box && !box.querySelector('[data-entag-top]')) box.removeAttribute('data-entag-sorted');
+  }
+
+  /* Glow + remontée en haut d'une ligne de la liste (message privé non lu).
+     L'ordre passe par le CSS (`order`), jamais par un déplacement d'éléments :
+     le site garde la main sur sa liste. Un conteneur « block » est basculé en
+     colonne flex pour que `order` s'applique ; table ou autre : on ne touche à rien. */
+  function syncUnreadRow(el, unread) {
+    const wantGlow = unread > 0 && state.settings.highlightUnread !== false;
+    const wantTop = unread > 0 && state.settings.unreadToTop !== false;
+    let row = el.closest('[data-entag-unread], [data-entag-top]');
+
+    if (!wantGlow && !wantTop) {
+      if (row) {
+        row.removeAttribute('data-entag-unread');
+        row.removeAttribute('data-entag-top');
+        releaseBox(row.parentElement);
+      }
+      return;
+    }
+
+    row = row || rowOf(el);
+    if (!row) return;
+    row.toggleAttribute('data-entag-unread', wantGlow);
+    row.toggleAttribute('data-entag-top', wantTop);
+    if (wantTop) {
+      const box = row.parentElement;
+      if (box && !box.hasAttribute('data-entag-sorted')) {
+        const display = getComputedStyle(box).display;
+        if (display === 'block' || display === 'flex' || display === 'grid') {
+          box.setAttribute('data-entag-sorted', display);
+        }
+      }
+    } else {
+      releaseBox(row.parentElement);
+    }
+  }
+
+  function syncWhisperRow(el, target, unread) {
+    if (target) el.dataset.entagWhispered = unread ? 'unread' : '1';
     else delete el.dataset.entagWhispered;
 
-    if (target && state.settings.hideWhispered === true) {
+    syncUnreadRow(el, target ? unread : 0);
+
+    /* Une personne qui vient d'écrire n'est jamais masquée par le filtre. */
+    if (target && !unread && state.settings.hideWhispered === true) {
       if (!el.closest('[data-entag-hidden]')) {
         const row = rowOf(el);
         if (row) row.setAttribute('data-entag-hidden', '');
@@ -545,7 +615,7 @@
     }
 
     const active = state.settings.hideWhispered === true;
-    const count = listAnchor ? listAnchor.querySelectorAll(FLAGGED).length : 0;
+    const count = listAnchor ? listAnchor.querySelectorAll(FLAGGED_HIDEABLE).length : 0;
     const rect = listAnchor ? listAnchor.getBoundingClientRect() : null;
     const visible = rect && rect.width > 80 && rect.height > 40 && (count > 0 || active);
 
@@ -575,9 +645,68 @@
   /* Conversations privées ouvertes (rubrique MESSAGES, à gauche)         */
   /* ------------------------------------------------------------------ */
 
-  function collectWhisperNicks() {
-    const found = new Set();
-    if (!selector) return found;
+  /* Entrée de la barre de gauche qui correspond à ce pseudo (conversation). */
+  function entryOf(el) {
+    const row = rowOf(el, false);
+    if (row) return row;
+    let node = el;
+    for (let i = 0; i < 2 && node.parentElement; i += 1) {
+      const parent = node.parentElement;
+      if (parent === document.body || containsChannel(parent) || countNicks(parent, 2) > 1) break;
+      node = parent;
+    }
+    return node;
+  }
+
+  function classText(node) {
+    return (node.getAttribute && node.getAttribute('class')) || '';
+  }
+
+  /* Nombre de messages non lus signalé par l'entrée de la barre de gauche (0 = aucun).
+     Aucune classe du site n'est supposée : on cherche un compteur (petit nombre à
+     côté du pseudo), un attribut ou un nom de classe explicite (unread, highlight...),
+     ou un sélecteur donné par l'utilisateur dans les options. */
+  function unreadOf(el, entry) {
+    if (!entry) return 0;
+
+    /* Conversation ouverte en ce moment : rien n'est « non lu ». */
+    for (let node = el; node; node = node.parentElement) {
+      const current = node.getAttribute && node.getAttribute('aria-current');
+      if (CURRENT_CLASS_RE.test(classText(node)) || node.getAttribute('aria-selected') === 'true' ||
+          (current && current !== 'false')) return 0;
+      if (node === entry) break;
+    }
+
+    for (const sel of state.settings.unreadSelectors || []) {
+      try {
+        if (entry.matches(sel) || entry.querySelector(sel)) return 1;
+      } catch (err) {
+        /* sélecteur invalide : ignoré */
+      }
+    }
+
+    const walker = document.createTreeWalker(entry, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+      const node = walker.currentNode;
+      if (el.contains(node) || (node.parentElement && node.parentElement.closest(OWN_CLASSES))) continue;
+      const match = /^(\d{1,3})\+?$/.exec(node.textContent.trim());
+      if (match && Number(match[1]) > 0) return Number(match[1]);
+    }
+
+    const nodes = [entry].concat(Array.from(entry.querySelectorAll('*')));
+    for (const node of nodes) {
+      if (node.closest(OWN_CLASSES)) continue;
+      const flag = node.getAttribute('data-unread') || node.getAttribute('data-has-unread');
+      if (flag && flag !== 'false' && flag !== '0') return Number(flag) > 0 ? Number(flag) : 1;
+      if (UNREAD_CLASS_RE.test(classText(node))) return 1;
+    }
+    return 0;
+  }
+
+  function collectWhisperState() {
+    const nicks = new Set();
+    const unread = new Map();
+    if (!selector) return { nicks, unread };
     document.querySelectorAll(STATE_SCOPE).forEach((box) => {
       if (box.closest(OWN_CLASSES)) return;
       let list;
@@ -589,25 +718,38 @@
       list.forEach((el) => {
         if (el.closest(OWN_CLASSES) || looksLikeChannel(el) || el.querySelector(selector)) return;
         const nick = extractNick(el);
-        if (isValidNick(nick)) found.add(nick.toLowerCase());
+        if (!isValidNick(nick)) return;
+        const key = nick.toLowerCase();
+        nicks.add(key);
+        const count = unreadOf(el, entryOf(el));
+        if (count > 0) unread.set(key, Math.max(count, unread.get(key) || 0));
       });
     });
-    return found;
+    return { nicks, unread };
   }
 
-  /* Recalcule la liste ; renvoie true si elle a changé. */
+  /* Recalcule conversations ouvertes et non lues ; renvoie true si quelque chose a changé. */
   function refreshWhisper() {
-    const next = collectWhisperNicks();
-    let changed = next.size !== whisperNicks.size;
+    const next = collectWhisperState();
+    let changed = next.nicks.size !== whisperNicks.size || next.unread.size !== whisperUnread.size;
     if (!changed) {
-      for (const nick of next) {
+      for (const nick of next.nicks) {
         if (!whisperNicks.has(nick)) {
           changed = true;
           break;
         }
       }
     }
-    whisperNicks = next;
+    if (!changed) {
+      for (const [nick, count] of next.unread) {
+        if (whisperUnread.get(nick) !== count) {
+          changed = true;
+          break;
+        }
+      }
+    }
+    whisperNicks = next.nicks;
+    whisperUnread = next.unread;
     return changed;
   }
 
@@ -671,6 +813,15 @@
       const roots = new Set();
       let stateTouched = false;
       for (const record of records) {
+        /* Changement de classe : seule la barre de gauche nous intéresse (une
+           conversation passe en « non lue »). */
+        if (record.type === 'attributes') {
+          const t = record.target;
+          if (!stateTouched && t instanceof Element && !t.closest(OWN_CLASSES) && t.closest(STATE_SCOPE)) {
+            stateTouched = true;
+          }
+          continue;
+        }
         if (onlyOurNodes(record)) continue;
         if (!stateTouched && touchesState(record)) stateTouched = true;
         if (record.type === 'characterData') {
@@ -702,7 +853,9 @@
     observer.observe(document.documentElement, {
       childList: true,
       subtree: true,
-      characterData: true
+      characterData: true,
+      attributes: true,
+      attributeFilter: ['class']
     });
   }
 

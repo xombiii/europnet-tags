@@ -84,6 +84,43 @@
   border-color: #3b82f6 transparent transparent transparent !important;
 }
 
+/* Message privé non lu : glow bleu sur la ligne + remontée en haut de la liste. */
+[data-entag-unread] {
+  background-color: rgba(59, 130, 246, .16) !important;
+  border-radius: 6px;
+  animation: entag-glow 1.6s ease-in-out infinite;
+}
+
+@keyframes entag-glow {
+  0%, 100% { box-shadow: 0 0 0 1px rgba(59, 130, 246, .45), 0 0 6px 1px rgba(59, 130, 246, .35); }
+  50%      { box-shadow: 0 0 0 1px rgba(96, 165, 250, .95), 0 0 16px 4px rgba(59, 130, 246, .8); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-entag-unread] { animation: none; box-shadow: 0 0 0 2px rgba(59, 130, 246, .8); }
+}
+
+/* `order` ne s'applique que dans un conteneur flex / grille : un conteneur « block »
+   est basculé en colonne flex (rendu identique) le temps qu'une ligne est remontée. */
+[data-entag-sorted="block"] { display: flex !important; flex-direction: column !important; }
+[data-entag-top] { order: -1 !important; }
+
+.entag-whisper--unread {
+  background: #f97316 !important;
+  animation: entag-pulse 1.1s ease-in-out infinite;
+}
+
+.entag-whisper--unread::after { border-top-color: #f97316 !important; }
+
+@keyframes entag-pulse {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.3); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .entag-whisper--unread { animation: none; }
+}
+
 /* Filtre « masquer les whisp » : ligne masquée + bouton flottant. */
 [data-entag-hidden] { display: none !important; }
 

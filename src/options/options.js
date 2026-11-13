@@ -7,7 +7,7 @@
   const $ = (id) => document.getElementById(id);
 
   const BUILTIN_HOSTS = ['*://*.europnet.org/*', '*://europnet.org/*'];
-  const CHECKBOXES = ['showInMessages', 'showInNicklist', 'showInSidebar', 'showWhisperFlag', 'hideWhispered', 'detectAliases', 'showNoteTooltip', 'contextMenuEnabled'];
+  const CHECKBOXES = ['showInMessages', 'showInNicklist', 'showInSidebar', 'showWhisperFlag', 'hideWhispered', 'detectAliases', 'highlightUnread', 'unreadToTop', 'showNoteTooltip', 'contextMenuEnabled'];
 
   let settings = Object.assign({}, S.DEFAULT_SETTINGS);
   let statusTimer = 0;
@@ -104,6 +104,7 @@
     $('badgeSize').value = settings.badgeSize || 10;
     $('badgeSizeValue').textContent = settings.badgeSize || 10;
     $('customSelectors').value = (settings.customSelectors || []).join('\n');
+    $('unreadSelectors').value = (settings.unreadSelectors || []).join('\n');
     renderDefaults();
   }
 
@@ -127,6 +128,15 @@
     error.hidden = invalid.length === 0;
     error.textContent = invalid.length ? 'Sélecteur(s) invalide(s), ignoré(s) : ' + invalid.join(' | ') : '';
     await persist({ customSelectors: lines.filter(validSelector) });
+  });
+
+  $('unreadSelectors').addEventListener('change', async (event) => {
+    const lines = event.target.value.split('\n').map((l) => l.trim()).filter(Boolean);
+    const invalid = lines.filter((line) => !validSelector(line));
+    const error = $('selector-error');
+    error.hidden = invalid.length === 0;
+    error.textContent = invalid.length ? 'Sélecteur(s) invalide(s), ignoré(s) : ' + invalid.join(' | ') : '';
+    await persist({ unreadSelectors: lines.filter(validSelector) });
   });
 
   $('host-form').addEventListener('submit', async (event) => {

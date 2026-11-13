@@ -17,6 +17,8 @@
     <label class="check"><input type="checkbox" id="showWhisperFlag"> Flag « whisp » dans la liste des membres quand une conversation privée est ouverte avec le pseudo</label>
     <label class="check"><input type="checkbox" id="hideWhispered"> Masquer de la liste des membres les pseudos avec une conversation privée ouverte (bouton aussi disponible sur la page du tchat)</label>
     <label class="check"><input type="checkbox" id="detectAliases"> Repérer les alias probables des pseudos tagués (anneau creux de la couleur du tag) et garder l'historique local des pseudos vus</label>
+    <label class="check"><input type="checkbox" id="highlightUnread"> Faire briller dans la liste de droite les pseudos dont j'ai un message privé non lu</label>
+    <label class="check"><input type="checkbox" id="unreadToTop"> … et les faire remonter en haut de la liste</label>
     <label class="check"><input type="checkbox" id="showNoteTooltip"> Afficher la note dans l'infobulle</label>
     <label class="check"><input type="checkbox" id="contextMenuEnabled"> Ouvrir le menu de tag au clic droit sur un pseudo</label>
     <label class="range">
@@ -37,6 +39,15 @@
       <textarea id="customSelectors" rows="5" spellcheck="false" placeholder="span.kiwi-messagelist-nick"></textarea>
     </label>
     <p class="error" id="selector-error" hidden></p>
+    <label class="field">
+      Conversations non lues (un sélecteur CSS par ligne, facultatif)
+      <textarea id="unreadSelectors" rows="2" spellcheck="false" placeholder=".kiwi-statebrowser-channel-unread"></textarea>
+    </label>
+    <p class="hint">
+      L'extension repère une conversation non lue à son compteur ou à une classe « unread »,
+      « highlight »… Si rien ne brille, indique ici un sélecteur qui désigne une conversation non lue
+      dans la barre de gauche.
+    </p>
     <details>
       <summary>Sélecteurs fournis par défaut</summary>
       <div id="default-selectors" class="defaults"></div>
