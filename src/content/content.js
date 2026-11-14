@@ -12,8 +12,9 @@
  * 6. propose un bouton pour masquer ces pseudos de la liste des membres ;
  * 7. repère les alias probables des pseudos tagués (pseudo proche, même âge /
  *    même ville lus dans la liste) et propose de leur appliquer le même tag ;
- * 8. fait briller (glow) dans la liste de droite les pseudos dont une conversation
- *    privée contient des messages non lus, et les fait remonter en haut.
+ * 8. dans la barre de gauche (rubrique MESSAGES), fait briller (glow) les
+ *    conversations privées non lues et les fait remonter en haut de la rubrique ;
+ *    dans la liste de droite, la bulle du pseudo passe en orange.
  */
 (function () {
   'use strict';
@@ -67,6 +68,10 @@
   let listParents = new Set();
   let structureEpoch = 0;
   const entryCache = new WeakMap();
+  const rowCache = new WeakMap();
+  /* Éléments de la barre de gauche qui portent nos attributs (glow / ordre). */
+  let markedEls = new Set();
+  let markedBoxes = new Set();
   let whisperTimer = 0;
 
   /* ------------------------------------------------------------------ */
@@ -524,51 +529,94 @@
     if (row) row.removeAttribute('data-entag-hidden');
   }
 
-  /* Libère le conteneur d'une liste quand plus aucune ligne n'y est remontée. */
-  function releaseBox(box) {
-    if (box && !box.querySelector('[data-entag-top]')) box.removeAttribute('data-entag-sorted');
+  function setAttr(el, name, on) {
+    const has = el.hasAttribute(name);
+    if (on && !has) el.setAttribute(name, '');
+    else if (!on && has) el.removeAttribute(name);
   }
 
-  /* Glow + remontée en haut d'une ligne de la liste (message privé non lu).
+  /* Ligne visible d'une conversation dans la barre de gauche : le plus grand
+     ancêtre (dans l'entrée) qui garde la hauteur d'une ligne. C'est elle qui brille. */
+  function visualRowOf(el, entry) {
+    const cached = rowCache.get(el);
+    if (cached && cached.epoch === structureEpoch && cached.row.isConnected && cached.row.contains(el)) {
+      return cached.row;
+    }
+    const limit = Math.max(60, (el.getBoundingClientRect().height || 16) * 4);
+    let row = el;
+    for (let node = el.parentElement; node && node !== document.body; node = node.parentElement) {
+      if (node.getBoundingClientRect().height > limit) break;
+      row = node;
+      if (node === entry) break;
+    }
+    rowCache.set(el, { row, epoch: structureEpoch });
+    return row;
+  }
+
+  /* Glow + remontée des conversations non lues dans la barre de gauche.
      L'ordre passe par le CSS (`order`), jamais par un déplacement d'éléments :
-     le site garde la main sur sa liste. Un conteneur « block » est basculé en
-     colonne flex pour que `order` s'applique ; table ou autre : on ne touche à rien. */
-  function syncUnreadRow(el, unread) {
-    const wantGlow = unread > 0 && state.settings.highlightUnread !== false;
-    const wantTop = unread > 0 && state.settings.unreadToTop !== false;
-    let row = el.closest('[data-entag-unread], [data-entag-top]');
+     le site garde la main sur sa liste. Chaque enfant du conteneur reçoit un
+     numéro explicite (2 × sa position) ; une conversation non lue prend le
+     numéro juste avant la première conversation, donc reste SOUS le titre
+     « MESSAGES » (et les salons) et AU-DESSUS des conversations lues. Un
+     conteneur « block » est basculé en colonne flex (rendu identique) le temps
+     de la remontée ; table, ligne flex ou autre : on ne touche à rien. */
+  function applySidebarOrder(rows) {
+    const wantGlow = state.settings.highlightUnread !== false;
+    const wantTop = state.settings.unreadToTop !== false;
+    const marked = new Set();
+    const boxes = new Set();
 
-    if (!wantGlow && !wantTop) {
-      if (row) {
-        row.removeAttribute('data-entag-unread');
-        row.removeAttribute('data-entag-top');
-        releaseBox(row.parentElement);
+    if ((wantGlow || wantTop) && rows.some((r) => r.count > 0)) {
+      const byBox = new Map();
+      rows.forEach((r) => {
+        const row = visualRowOf(r.el, r.entry);
+        const count = Math.max(r.count, (byBox.get(row.parentElement) || new Map()).get(row) || 0);
+        setAttr(row, 'data-entag-unread', wantGlow && count > 0);
+        marked.add(row);
+        const box = row.parentElement;
+        if (!box) return;
+        if (!byBox.has(box)) byBox.set(box, new Map());
+        byBox.get(box).set(row, count);
+      });
+
+      if (wantTop) {
+        byBox.forEach((pmRows, box) => {
+          const kids = Array.from(box.children);
+          if (kids.length * 2 > 398) return;
+          const display = getComputedStyle(box).display;
+          const style = getComputedStyle(box);
+          const ok = display === 'block' || display === 'grid' ||
+            (display === 'flex' && style.flexDirection.startsWith('column'));
+          if (!ok) return;
+          const first = kids.findIndex((kid) => pmRows.has(kid));
+          kids.forEach((kid, i) => {
+            const count = pmRows.get(kid) || 0;
+            const order = String(count > 0 ? 2 * first - 1 : 2 * i);
+            if (kid.getAttribute('data-entag-order') !== order) kid.setAttribute('data-entag-order', order);
+            marked.add(kid);
+          });
+          if (display === 'block') box.setAttribute('data-entag-sorted', 'block');
+          boxes.add(box);
+        });
       }
-      return;
     }
 
-    row = row || rowOf(el);
-    if (!row) return;
-    row.toggleAttribute('data-entag-unread', wantGlow);
-    row.toggleAttribute('data-entag-top', wantTop);
-    if (wantTop) {
-      const box = row.parentElement;
-      if (box && !box.hasAttribute('data-entag-sorted')) {
-        const display = getComputedStyle(box).display;
-        if (display === 'block' || display === 'flex' || display === 'grid') {
-          box.setAttribute('data-entag-sorted', display);
-        }
-      }
-    } else {
-      releaseBox(row.parentElement);
-    }
+    markedEls.forEach((el) => {
+      if (marked.has(el)) return;
+      el.removeAttribute('data-entag-unread');
+      el.removeAttribute('data-entag-order');
+    });
+    markedBoxes.forEach((box) => {
+      if (!boxes.has(box)) box.removeAttribute('data-entag-sorted');
+    });
+    markedEls = marked;
+    markedBoxes = boxes;
   }
 
   function syncWhisperRow(el, target, unread) {
     if (target) el.dataset.entagWhispered = unread ? 'unread' : '1';
     else delete el.dataset.entagWhispered;
-
-    syncUnreadRow(el, target ? unread : 0);
 
     /* Une personne qui vient d'écrire n'est jamais masquée par le filtre. */
     if (target && !unread && state.settings.hideWhispered === true) {
@@ -759,7 +807,8 @@
     const unread = new Map();
     const entries = new Set();
     const parents = new Set();
-    if (!selector) return { nicks, unread, entries, parents };
+    const rows = [];
+    if (!selector) return { nicks, unread, entries, parents, rows };
 
     /* Une seule recherche par bloc de premier niveau (les blocs imbriqués
        portent aussi « statebrowser » dans leur classe). */
@@ -794,8 +843,9 @@
       if (entry.parentElement) parents.add(entry.parentElement);
       const count = unreadOf(el, entry);
       if (count > 0) unread.set(key, Math.max(count, unread.get(key) || 0));
+      rows.push({ el, entry, count });
     });
-    return { nicks, unread, entries, parents };
+    return { nicks, unread, entries, parents, rows };
   }
 
   /* Recalcule conversations ouvertes et non lues ; renvoie les pseudos dont l'état a changé. */
@@ -810,6 +860,7 @@
     whisperUnread = next.unread;
     entrySet = next.entries;
     listParents = next.parents;
+    applySidebarOrder(next.rows);
     return Array.from(changed);
   }
 

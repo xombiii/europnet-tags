@@ -23,16 +23,17 @@ localement dans le navigateur.
   ouverte (la ligne entière disparaît), un second clic les réaffiche. Le compteur
   suit les ouvertures / fermetures de conversations ; le choix est mémorisé et
   réglable aussi dans les options.
-- **Messages privés non lus** : dans la liste de droite, la ligne d'une personne qui t'a
-  écrit sans que tu aies ouvert la conversation **brille en bleu** (la bulle devient orange
-  et pulse, l'infobulle donne le nombre) et **remonte en haut de la liste** ; les autres
-  restent dessous, dans leur ordre. Dès que tu lis le message, tout redevient normal.
-  Le non-lu est repéré dans la barre de gauche (rubrique MESSAGES) : compteur à côté du
-  pseudo, classe de type « unread » / « highlight », ou le sélecteur CSS que tu peux
-  indiquer dans les options. La conversation ouverte n'est jamais « non lue » et
-  quelqu'un qui vient d'écrire n'est jamais masqué par le bouton « Masquer les whisp ».
-  Glow et remontée se règlent séparément dans les options. La remontée utilise l'ordre CSS
-  (`order`) : aucun élément de la page n'est déplacé.
+- **Messages privés non lus** : dans la barre de gauche, la conversation qui contient des
+  messages non lus **brille en bleu** et **remonte en haut de la rubrique MESSAGES** (sous son
+  titre, avant les conversations lues, qui restent dessous dans leur ordre). Dans la liste de
+  droite, la bulle du pseudo passe en orange (l'infobulle donne le nombre). Dès que tu lis le
+  message, tout redevient normal.
+  Le non-lu est repéré dans la barre de gauche : compteur à côté du pseudo, classe de type
+  « unread » / « highlight », ou le sélecteur CSS que tu peux indiquer dans les options.
+  La conversation ouverte n'est jamais « non lue » et quelqu'un qui vient d'écrire n'est jamais
+  masqué de la liste de droite par le bouton « Masquer les whisp ». Glow et remontée se règlent
+  séparément dans les options. La remontée utilise l'ordre CSS (`order`) : aucun élément de la
+  page n'est déplacé ; le glow est fixe, sans animation, pour ne pas alourdir la page.
 - **Détecteur d'alias** : quand un pseudo ressemble à l'un de tes pseudos tagués, un
   **anneau creux de la couleur de ce tag** apparaît à côté (infobulle : « Alias probable
   de X — 98 % », avec les raisons). Clic droit sur le pseudo → **Appliquer son tag** (le
@@ -82,7 +83,7 @@ zip -r -FS ../europnet-tags.zip . -x '*.git*' 'test/*'
 | Ajouter une note | Champ « Note » du menu, validé par <kbd>Entrée</kbd> |
 | Retirer un tag | Clic droit → « Retirer le tag » |
 | Voir qui j'ai déjà whispé | Bulle bleue dans la liste des membres (conversation ouverte dans MESSAGES) |
-| Voir qui m'a écrit sans que j'aie ouvert | Ligne qui brille en haut de la liste de droite |
+| Voir qui m'a écrit sans que j'aie ouvert | Conversation qui brille en haut de MESSAGES (barre de gauche) |
 | Trouver les alias d'un pseudo tagué | Popup → bouton « Alias » sur sa ligne (ou anneau dans le tchat) |
 | Cacher ceux avec qui j'ai déjà une conversation | Bouton « Masquer les whisp » en bas de la liste des membres |
 | Voir / gérer tous les tags | Icône de l'extension dans la barre d'outils |
@@ -148,6 +149,6 @@ droit, l'enregistrement des tags et notes, le flag « whisp » (ouverture et fer
 d'une conversation privée, ordre pastille / flag, réglage), le filtre qui masque
 les lignes de la liste (bouton, compteur, réglage des options), le score d'alias
 (cas typiques, faux positifs évités, historique, panneau du popup, « Ce n'est pas lui »),
-les messages non lus (compteur, classe, sélecteur personnalisé, conversation ouverte, glow et
-remontée, réglages, conversation unique)
+les messages non lus dans la barre de gauche (compteur, classe, sélecteur personnalisé,
+conversation ouverte, glow et remontée sous le titre et avant le bouton, réglages, conversation unique)
 et le mode pipette.

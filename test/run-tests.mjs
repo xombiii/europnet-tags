@@ -515,112 +515,127 @@ check('alias : détecté même si le candidat est listé avant le pseudo tagué'
 check('alias : le score tient compte de l\'âge et de la ville du pseudo tagué',
   /même ville/.test(early[0] && early[0].title) && /même âge/.test(early[0] && early[0].title), early[0] && early[0].title);
 
-/* 12. Messages privés non lus : glow + remontée dans la liste de droite -------- */
+/* 12. Messages privés non lus : glow + remontée dans la barre de gauche (MESSAGES) */
 await page.goto(pathToFileURL(join(here, 'fixture-chatteurs.html')).href);
+await page.evaluate(() => {
+  /* Un bouton après la liste : il doit rester en bas quand une conversation remonte. */
+  const add = document.createElement('button');
+  add.className = 'add-btn';
+  add.textContent = '+';
+  document.querySelector('.kiwi-statebrowser').appendChild(add);
+});
 await page.addStyleTag({ content: read('src/content/content.css') });
 await page.addScriptTag({ content: read('src/common/store.js') });
 await page.addScriptTag({ content: read('src/common/alias.js') });
 await page.addScriptTag({ content: read('src/content/content.js') });
 await page.waitForTimeout(400);
 
-const entry = (nick, fn) => page.evaluate(([n, code]) => {
+const entry = (nick, code) => page.evaluate(([n, body]) => {
   const names = Array.from(document.querySelectorAll('.kiwi-statebrowser-channel-name'));
   const box = names.find((el) => el.textContent.trim() === n).closest('.kiwi-statebrowser-channel');
-  return new Function('box', code)(box);
-}, [nick, fn]);
-const rowInfo = (nick) => page.evaluate((n) => {
-  const el = Array.from(document.querySelectorAll('#chatters .cell-username')).find((e) => e.dataset.entagNick === n);
-  const row = el.closest('.row');
-  const bubble = el.querySelector('.entag-whisper');
-  return {
-    unread: row.hasAttribute('data-entag-unread'),
-    top: row.hasAttribute('data-entag-top'),
-    y: row.getBoundingClientRect().top,
-    bubbleUnread: Boolean(bubble && bubble.classList.contains('entag-whisper--unread')),
-    bubbleTitle: bubble ? bubble.title : ''
-  };
+  return new Function('box', body)(box);
+}, [nick, code]);
+const leftInfo = (nick) => page.evaluate((n) => {
+  const names = Array.from(document.querySelectorAll('.kiwi-statebrowser-channel-name'));
+  const box = names.find((el) => el.textContent.trim() === n).closest('.kiwi-statebrowser-channel');
+  return { unread: box.hasAttribute('data-entag-unread'), order: box.getAttribute('data-entag-order'), y: box.getBoundingClientRect().top };
 }, nick);
-const orderOf = async () => {
-  const rows = await page.evaluate(() => Array.from(document.querySelectorAll('#chatters .cell-username'))
-    .map((e) => ({ n: e.dataset.entagNick, y: e.closest('.row').getBoundingClientRect().top })));
-  return rows.sort((a, b) => a.y - b.y).map((r) => r.n);
-};
-const sortedBox = () => page.evaluate(() => document.getElementById('chatters').getAttribute('data-entag-sorted'));
+const leftOrder = () => page.evaluate(() => {
+  const items = Array.from(document.querySelectorAll('.kiwi-statebrowser > *'))
+    .map((el) => ({
+      n: el.tagName === 'H3' ? 'TITRE' : el.tagName === 'BUTTON' ? 'BOUTON'
+        : el.querySelector('.kiwi-statebrowser-channel-name').textContent.trim(),
+      y: el.getBoundingClientRect().top
+    }));
+  return items.sort((x, y) => x.y - y.y).map((i) => i.n);
+});
+const navSorted = () => page.evaluate(() => document.querySelector('.kiwi-statebrowser').getAttribute('data-entag-sorted'));
+const rightOrder = () => page.evaluate(() => Array.from(document.querySelectorAll('#chatters .cell-username'))
+  .map((e) => ({ n: e.dataset.entagNick, y: e.closest('.row').getBoundingClientRect().top }))
+  .sort((x, y) => x.y - y.y).map((r) => r.n));
+const rightBubble = (nick) => page.evaluate((n) => {
+  const el = Array.from(document.querySelectorAll('#chatters .cell-username')).find((e) => e.dataset.entagNick === n);
+  const bubble = el.querySelector('.entag-whisper');
+  return { unread: Boolean(bubble && bubble.classList.contains('entag-whisper--unread')), title: bubble ? bubble.title : '' };
+}, nick);
+const marks = () => page.evaluate(() => document.querySelectorAll('[data-entag-unread], [data-entag-order], [data-entag-sorted]').length);
+const counter = (n) => "const s = document.createElement('span'); s.className = 'kiwi-statebrowser-channel-label'; s.textContent = '" + n + "'; box.appendChild(s);";
+const noCounter = "const l = box.querySelector('.kiwi-statebrowser-channel-label'); if (l) l.remove();";
 
-check('non lu : au départ, aucune ligne ne brille',
-  (await page.locator('[data-entag-unread]').count()) === 0 && (await orderOf())[0] === 'Signit', await orderOf());
+check('non lu (gauche) : au départ, rien ne brille et rien n\'est modifié',
+  (await marks()) === 0 && (await leftOrder()).join() === 'TITRE,Soraka,anais-24,_petitebrune,BOUTON', await leftOrder());
 
-/* a. Compteur à côté du pseudo dans la barre de gauche. */
-await entry('Soraka', "const s = document.createElement('span'); s.className = 'kiwi-statebrowser-channel-label'; s.textContent = '2'; box.appendChild(s);");
+/* a. Compteur sur la dernière conversation. */
+await entry('_petitebrune', counter(3));
 await page.waitForTimeout(500);
-let info = await rowInfo('Soraka');
-check('non lu (compteur) : la ligne de Soraka brille', info.unread && info.top, info);
-check('non lu : la bulle devient « non lu » avec le nombre dans l\'infobulle',
-  info.bubbleUnread && /non lu/.test(info.bubbleTitle) && /\(2\)/.test(info.bubbleTitle), info);
-check('non lu : Soraka remonte en tête de liste (la liste reste dans le DOM d\'origine)',
-  (await orderOf())[0] === 'Soraka', await orderOf());
-check('non lu : la liste est basculée en colonne flex le temps de la remontée', (await sortedBox()) === 'block');
-check('non lu : les autres conversations ouvertes ne brillent pas',
-  !(await rowInfo('anais-24')).unread && !(await rowInfo('_petitebrune')).unread);
+let info = await leftInfo('_petitebrune');
+check('non lu (compteur) : la conversation _petitebrune brille dans MESSAGES', info.unread, info);
+check('non lu : elle remonte en tête des conversations, sous le titre et avant le bouton',
+  (await leftOrder()).join() === 'TITRE,_petitebrune,Soraka,anais-24,BOUTON', await leftOrder());
 check('non lu : l\'ordre dans le DOM n\'a pas été modifié',
-  await page.evaluate(() => Array.from(document.querySelectorAll('#chatters .cell-username'))
-    .map((e) => e.dataset.entagNick).slice(0, 2).join() === 'Signit,Soraka'));
+  await page.evaluate(() => Array.from(document.querySelectorAll('.kiwi-statebrowser-channel-name')).map((e) => e.textContent.trim()).join() === 'Soraka,anais-24,_petitebrune'));
+check('non lu : les autres conversations ne brillent pas',
+  !(await leftInfo('Soraka')).unread && !(await leftInfo('anais-24')).unread);
+check('non lu : la barre est basculée en colonne flex le temps de la remontée', (await navSorted()) === 'block');
+const bubble = await rightBubble('_petitebrune');
+check('non lu : à droite, seule la bulle du pseudo passe en « non lu » (avec le nombre)',
+  bubble.unread && /non lu/.test(bubble.title) && /\(3\)/.test(bubble.title), bubble);
+check('non lu : la liste de droite n\'est ni réordonnée ni illuminée',
+  (await rightOrder())[0] === 'Signit' &&
+  (await page.evaluate(() => document.querySelectorAll('#chatters [data-entag-unread], #chatters [data-entag-order]').length)) === 0);
 
-/* b. Classe « unread » sur l'entrée (changement d'attribut seulement). */
+/* b. Classe « unread » (changement d'attribut seulement) : plusieurs non lus, ordre de la liste conservé. */
 await entry('anais-24', "box.classList.add('kiwi-statebrowser-channel-unread');");
 await page.waitForTimeout(500);
-check('non lu (classe) : anais-24 brille aussi, les deux remontent dans l\'ordre de la liste',
-  (await rowInfo('anais-24')).unread && (await orderOf()).slice(0, 3).join() === 'Soraka,anais-24,Signit', await orderOf());
+check('non lu (classe) : deux non lus remontés dans leur ordre d\'origine',
+  (await leftOrder()).join() === 'TITRE,anais-24,_petitebrune,Soraka,BOUTON', await leftOrder());
 
 /* c. Conversation ouverte en ce moment : rien de non lu. */
 await entry('anais-24', "box.classList.add('kiwi-statebrowser-channel-active');");
 await page.waitForTimeout(500);
-check('non lu : la conversation ouverte (active) ne brille plus',
-  !(await rowInfo('anais-24')).unread && (await orderOf())[0] === 'Soraka' && (await orderOf())[1] !== 'anais-24', await orderOf());
+check('non lu : la conversation ouverte (active) ne brille plus et redescend',
+  !(await leftInfo('anais-24')).unread && (await leftOrder()).join() === 'TITRE,_petitebrune,Soraka,anais-24,BOUTON', await leftOrder());
 
 /* d. Le filtre « masquer les whisp » ne masque jamais quelqu'un qui vient d'écrire. */
 await page.evaluate(() => browser.storage.local.set({ settings: { hideWhispered: true } }));
 await page.waitForTimeout(500);
-check('non lu : Soraka (a écrit) reste visible, _petitebrune (silencieux) est masqué',
+check('non lu : _petitebrune (a écrit) reste visible à droite, Soraka (silencieux) est masqué',
   await page.evaluate(() => {
     const row = (n) => Array.from(document.querySelectorAll('#chatters .cell-username'))
       .find((e) => e.dataset.entagNick === n).closest('.row');
-    return getComputedStyle(row('Soraka')).display !== 'none' && getComputedStyle(row('_petitebrune')).display === 'none';
+    return getComputedStyle(row('_petitebrune')).display !== 'none' && getComputedStyle(row('Soraka')).display === 'none';
   }));
 await page.evaluate(() => browser.storage.local.set({ settings: {} }));
 await page.waitForTimeout(400);
 
-/* e. Message lu : la ligne retrouve sa place et la liste son rendu normal. */
-await entry('Soraka', "box.querySelector('.kiwi-statebrowser-channel-label').remove();");
+/* e. Message lu : tout redevient exactement comme avant. */
+await entry('_petitebrune', noCounter);
 await page.waitForTimeout(500);
-check('non lu : une fois lu, plus de glow, ordre d\'origine rétabli',
-  !(await rowInfo('Soraka')).unread && (await orderOf())[0] === 'Signit', await orderOf());
-check('non lu : la liste n\'est plus modifiée quand plus rien n\'est remonté', (await sortedBox()) === null, await sortedBox());
+check('non lu : une fois lu, plus de glow, ordre d\'origine rétabli, aucun attribut résiduel',
+  (await marks()) === 0 && (await leftOrder()).join() === 'TITRE,Soraka,anais-24,_petitebrune,BOUTON', { marks: await marks(), order: await leftOrder() });
 
 /* f. Réglages indépendants : glow seul / remontée seule. */
-await entry('Soraka', "const s = document.createElement('span'); s.className = 'kiwi-statebrowser-channel-label'; s.textContent = '1'; box.appendChild(s);");
+await entry('_petitebrune', counter(1));
 await page.evaluate(() => browser.storage.local.set({ settings: { unreadToTop: false } }));
 await page.waitForTimeout(500);
-info = await rowInfo('Soraka');
 check('réglage « remonter » coupé : ça brille mais ça ne bouge pas',
-  info.unread && !info.top && (await orderOf())[0] === 'Signit', { info, order: await orderOf() });
+  (await leftInfo('_petitebrune')).unread && (await leftOrder()).join() === 'TITRE,Soraka,anais-24,_petitebrune,BOUTON', await leftOrder());
 await page.evaluate(() => browser.storage.local.set({ settings: { highlightUnread: false } }));
 await page.waitForTimeout(500);
-info = await rowInfo('Soraka');
 check('réglage « glow » coupé : ça remonte sans briller',
-  !info.unread && info.top && (await orderOf())[0] === 'Soraka', { info, order: await orderOf() });
+  !(await leftInfo('_petitebrune')).unread && (await leftOrder()).join() === 'TITRE,_petitebrune,Soraka,anais-24,BOUTON', await leftOrder());
 await page.evaluate(() => browser.storage.local.set({ settings: {} }));
 await page.waitForTimeout(400);
-await entry('Soraka', "box.querySelector('.kiwi-statebrowser-channel-label').remove();");
+await entry('_petitebrune', noCounter);
 await page.waitForTimeout(400);
 
 /* g. Sélecteur « non lu » donné dans les options (issue de secours). */
-await entry('_petitebrune', "const i = document.createElement('i'); i.className = 'my-dot'; box.appendChild(i);");
+await entry('Soraka', "const i = document.createElement('i'); i.className = 'my-dot'; box.appendChild(i);");
 await page.waitForTimeout(400);
-check('non lu : sans sélecteur personnalisé, un point inconnu ne compte pas', !(await rowInfo('_petitebrune')).unread);
+check('non lu : sans sélecteur personnalisé, un point inconnu ne compte pas', !(await leftInfo('Soraka')).unread);
 await page.evaluate(() => browser.storage.local.set({ settings: { unreadSelectors: ['.my-dot'] } }));
 await page.waitForTimeout(500);
-check('non lu : sélecteur personnalisé (.my-dot) reconnu', (await rowInfo('_petitebrune')).unread);
+check('non lu : sélecteur personnalisé (.my-dot) reconnu', (await leftInfo('Soraka')).unread);
 await page.evaluate(() => browser.storage.local.set({ settings: {} }));
 await page.waitForTimeout(300);
 
@@ -629,10 +644,10 @@ await page.evaluate(() => {
   Array.from(document.querySelectorAll('.kiwi-statebrowser-channel-name'))
     .filter((e) => e.textContent.trim() !== 'Soraka').forEach((e) => e.closest('.kiwi-statebrowser-channel').remove());
 });
-await entry('Soraka', "const s = document.createElement('span'); s.className = 'kiwi-statebrowser-channel-label'; s.textContent = '4'; box.appendChild(s);");
+await entry('Soraka', "box.querySelector('.my-dot').remove();" + counter(4));
 await page.waitForTimeout(500);
-info = await rowInfo('Soraka');
-check('non lu : détecté même avec une seule conversation ouverte', info.unread && /\(4\)/.test(info.bubbleTitle), info);
+check('non lu : détecté même avec une seule conversation (glow + bulle « 4 »)',
+  (await leftInfo('Soraka')).unread && /\(4\)/.test((await rightBubble('Soraka')).title), await leftInfo('Soraka'));
 
 await browser.close();
 
