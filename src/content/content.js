@@ -13,8 +13,11 @@
  * 7. repère les alias probables des pseudos tagués (pseudo proche, même âge /
  *    même ville lus dans la liste) et propose de leur appliquer le même tag ;
  * 8. dans la barre de gauche (rubrique MESSAGES), fait briller (glow) les
- *    conversations privées non lues et les fait remonter en haut de la rubrique ;
- *    dans la liste de droite, la bulle du pseudo passe en orange.
+ *    conversations privées non lues et épingle en haut un panneau « Non lus »
+ *    cliquable, même quand la liste est défilée ; dans la liste de droite, la
+ *    bulle du pseudo passe en orange ;
+ * 9. une seule instance active par page, et nettoyage des restes d'une version
+ *    précédente (boutons fantômes) au chargement.
  */
 (function () {
   'use strict';
@@ -22,7 +25,14 @@
   const S = globalThis.ENTag;
   const api = S.api;
 
-  const OWN_CLASSES = '.entag-badge, .entag-alias, .entag-whisper, .entag-filter, .entag-menu, .entag-toast';
+  /* Une seule instance active par page : si le script est injecté plusieurs fois
+     (rechargement de l'extension, injection en double), seule la dernière garde la
+     main ; les autres se mettent en veille au premier événement. */
+  const instanceId = Math.random().toString(36).slice(2) + Date.now().toString(36);
+  document.documentElement.setAttribute('data-entag-instance', instanceId);
+  let shutDown = false;
+
+  const OWN_CLASSES = '.entag-badge, .entag-alias, .entag-whisper, .entag-filter, .entag-unread-panel, .entag-menu, .entag-toast';
   /* Liste des membres (à droite). */
   const NICKLIST_SCOPE = '[class*="nicklist" i], [class*="memberlist" i], [class*="userlist" i], ' +
     '[class*="member-list" i], [class*="user-list" i]';
@@ -69,9 +79,8 @@
   let structureEpoch = 0;
   const entryCache = new WeakMap();
   const rowCache = new WeakMap();
-  /* Éléments de la barre de gauche qui portent nos attributs (glow / ordre). */
+  /* Lignes de la barre de gauche qui portent le glow. */
   let markedEls = new Set();
-  let markedBoxes = new Set();
   let whisperTimer = 0;
 
   /* ------------------------------------------------------------------ */
@@ -553,65 +562,116 @@
     return row;
   }
 
-  /* Glow + remontée des conversations non lues dans la barre de gauche.
-     L'ordre passe par le CSS (`order`), jamais par un déplacement d'éléments :
-     le site garde la main sur sa liste. Chaque enfant du conteneur reçoit un
-     numéro explicite (2 × sa position) ; une conversation non lue prend le
-     numéro juste avant la première conversation, donc reste SOUS le titre
-     « MESSAGES » (et les salons) et AU-DESSUS des conversations lues. Un
-     conteneur « block » est basculé en colonne flex (rendu identique) le temps
-     de la remontée ; table, ligne flex ou autre : on ne touche à rien. */
-  function applySidebarOrder(rows) {
-    const wantGlow = state.settings.highlightUnread !== false;
-    const wantTop = state.settings.unreadToTop !== false;
+  /* Conversations non lues de la barre de gauche (dernier relevé). */
+  let unreadRows = [];
+  let unreadPanel = null;
+  let unreadSig = '';
+
+  /* Glow sur la ligne de chaque conversation non lue (attribut + CSS : rien n'est
+     déplacé ni modifié dans la liste du site). */
+  function applySidebarGlow(rows) {
     const marked = new Set();
-    const boxes = new Set();
-
-    if ((wantGlow || wantTop) && rows.some((r) => r.count > 0)) {
-      const byBox = new Map();
+    if (state.settings.highlightUnread !== false) {
       rows.forEach((r) => {
+        if (r.count <= 0) return;
         const row = visualRowOf(r.el, r.entry);
-        const count = Math.max(r.count, (byBox.get(row.parentElement) || new Map()).get(row) || 0);
-        setAttr(row, 'data-entag-unread', wantGlow && count > 0);
+        setAttr(row, 'data-entag-unread', true);
         marked.add(row);
-        const box = row.parentElement;
-        if (!box) return;
-        if (!byBox.has(box)) byBox.set(box, new Map());
-        byBox.get(box).set(row, count);
       });
-
-      if (wantTop) {
-        byBox.forEach((pmRows, box) => {
-          const kids = Array.from(box.children);
-          if (kids.length * 2 > 398) return;
-          const display = getComputedStyle(box).display;
-          const style = getComputedStyle(box);
-          const ok = display === 'block' || display === 'grid' ||
-            (display === 'flex' && style.flexDirection.startsWith('column'));
-          if (!ok) return;
-          const first = kids.findIndex((kid) => pmRows.has(kid));
-          kids.forEach((kid, i) => {
-            const count = pmRows.get(kid) || 0;
-            const order = String(count > 0 ? 2 * first - 1 : 2 * i);
-            if (kid.getAttribute('data-entag-order') !== order) kid.setAttribute('data-entag-order', order);
-            marked.add(kid);
-          });
-          if (display === 'block') box.setAttribute('data-entag-sorted', 'block');
-          boxes.add(box);
-        });
-      }
     }
-
     markedEls.forEach((el) => {
-      if (marked.has(el)) return;
-      el.removeAttribute('data-entag-unread');
-      el.removeAttribute('data-entag-order');
-    });
-    markedBoxes.forEach((box) => {
-      if (!boxes.has(box)) box.removeAttribute('data-entag-sorted');
+      if (!marked.has(el)) el.removeAttribute('data-entag-unread');
     });
     markedEls = marked;
-    markedBoxes = boxes;
+  }
+
+  function scrollParentOf(el) {
+    for (let node = el.parentElement; node && node !== document.body; node = node.parentElement) {
+      const overflow = getComputedStyle(node).overflowY;
+      if ((overflow === 'auto' || overflow === 'scroll') && node.scrollHeight > node.clientHeight + 2) return node;
+    }
+    return null;
+  }
+
+  function buildUnreadPanel() {
+    const panel = document.createElement('div');
+    panel.className = 'entag-unread-panel';
+    panel.hidden = true;
+    panel.addEventListener('click', (event) => {
+      const item = event.target.closest('[data-entag-key]');
+      if (!item) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const row = unreadRows.find((r) => r.key === item.dataset.entagKey);
+      /* On relaie le clic sur la conversation du site : c'est elle qui s'ouvre. */
+      if (row && row.el.isConnected) row.el.click();
+    });
+    panel.addEventListener('contextmenu', (event) => event.stopPropagation());
+    document.body.appendChild(panel);
+    return panel;
+  }
+
+  /* Panneau « Non lus » épinglé en haut de la zone qui défile de la barre de gauche :
+     toujours visible, quelle que soit la position de la liste ou sa mise en page. */
+  function updateUnreadPanel() {
+    let panel = unreadPanel && unreadPanel.isConnected ? unreadPanel : null;
+    const items = state.settings.unreadToTop === false ? [] : unreadRows.filter((r) => r.el.isConnected);
+    if (!items.length) {
+      if (panel) panel.hidden = true;
+      return;
+    }
+
+    const first = items[0];
+    const box = scrollParentOf(first.el) || first.entry.parentElement || first.el.parentElement;
+    const rect = box ? box.getBoundingClientRect() : null;
+    if (!rect || rect.width < 80 || rect.height < 40) {
+      if (panel) panel.hidden = true;
+      return;
+    }
+
+    if (!panel) {
+      panel = buildUnreadPanel();
+      unreadPanel = panel;
+      unreadSig = '';
+    }
+
+    const sorted = items.slice().sort((a, b) => b.count - a.count);
+    const sig = sorted.map((r) => r.key + ':' + r.count + ':' + ((state.tags[r.key] || {}).tag || '')).join('|');
+    if (sig !== unreadSig) {
+      unreadSig = sig;
+      panel.textContent = '';
+      const title = document.createElement('div');
+      title.className = 'entag-unread-panel__title';
+      title.textContent = 'Non lus (' + sorted.length + ')';
+      panel.appendChild(title);
+      sorted.forEach((r) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'entag-unread-item';
+        button.dataset.entagKey = r.key;
+        button.title = 'Ouvrir la conversation avec ' + r.nick;
+        const tag = (state.tags[r.key] || {}).tag;
+        if (tag) {
+          const dot = document.createElement('span');
+          dot.className = 'entag-unread-dot entag-unread-dot--' + tag;
+          button.appendChild(dot);
+        }
+        const name = document.createElement('span');
+        name.className = 'entag-unread-name';
+        name.textContent = r.nick;
+        const count = document.createElement('span');
+        count.className = 'entag-unread-count';
+        count.textContent = r.count > 99 ? '99+' : String(r.count);
+        button.append(name, count);
+        panel.appendChild(button);
+      });
+    }
+
+    panel.hidden = false;
+    const width = Math.min(box.clientWidth || rect.width, window.innerWidth - rect.left);
+    panel.style.left = Math.max(0, rect.left) + 'px';
+    panel.style.top = Math.max(0, rect.top) + 'px';
+    panel.style.width = width + 'px';
   }
 
   function syncWhisperRow(el, target, unread) {
@@ -636,7 +696,14 @@
   function scheduleChipUpdate() {
     if (chipScheduled) return;
     chipScheduled = true;
-    setTimeout(updateFilterChip, CHIP_REFRESH_MS);
+    setTimeout(updateOverlays, CHIP_REFRESH_MS);
+  }
+
+  function updateOverlays() {
+    chipScheduled = false;
+    if (!alive()) return;
+    updateUnreadPanel();
+    updateFilterChip();
   }
 
   async function toggleHideWhispered() {
@@ -831,19 +898,19 @@
         }
         const nick = extractNick(el);
         if (!isValidNick(nick)) return;
-        found.push({ el, key: nick.toLowerCase() });
+        found.push({ el, key: nick.toLowerCase(), nick });
         others.push(el);
       });
     });
 
-    found.forEach(({ el, key }) => {
+    found.forEach(({ el, key, nick }) => {
       nicks.add(key);
       const entry = entryFor(el, others);
       entries.add(entry);
       if (entry.parentElement) parents.add(entry.parentElement);
       const count = unreadOf(el, entry);
       if (count > 0) unread.set(key, Math.max(count, unread.get(key) || 0));
-      rows.push({ el, entry, count });
+      rows.push({ el, key, nick, entry, count });
     });
     return { nicks, unread, entries, parents, rows };
   }
@@ -860,7 +927,9 @@
     whisperUnread = next.unread;
     entrySet = next.entries;
     listParents = next.parents;
-    applySidebarOrder(next.rows);
+    unreadRows = next.rows.filter((r) => r.count > 0);
+    applySidebarGlow(next.rows);
+    updateUnreadPanel();
     return Array.from(changed);
   }
 
@@ -868,13 +937,14 @@
     if (whisperTimer) return;
     whisperTimer = setTimeout(() => {
       whisperTimer = 0;
+      if (!alive()) return;
       const changed = refreshWhisper();
       if (changed.length) rescanNicks(changed);
     }, WHISPER_REFRESH_MS);
   }
 
   function scan(root) {
-    if (!ready || !selector) return;
+    if (!ready || !selector || !alive()) return;
     const scope = root && root.nodeType === Node.ELEMENT_NODE ? root : document.body;
     if (!scope) return;
     if (scope === document.body) refreshWhisper();
@@ -907,7 +977,8 @@
   function isOurNode(node) {
     return node.nodeType === Node.ELEMENT_NODE &&
       (node.classList.contains('entag-badge') || node.classList.contains('entag-whisper') ||
-       node.classList.contains('entag-alias') || node.classList.contains('entag-filter') || node.classList.contains('entag-menu') || node.classList.contains('entag-toast'));
+       node.classList.contains('entag-alias') || node.classList.contains('entag-filter') ||
+       node.classList.contains('entag-unread-panel') || node.classList.contains('entag-menu') || node.classList.contains('entag-toast'));
   }
 
   /* Mutation qui n'ajoute / retire que nos propres éléments : on l'ignore. */
@@ -955,6 +1026,7 @@
   function startObserver() {
     if (observer) observer.disconnect();
     observer = new MutationObserver((records) => {
+      if (!alive()) return;
       const roots = new Set();
       let stateTouched = false;
       for (const record of records) {
@@ -968,6 +1040,7 @@
           continue;
         }
         if (onlyOurNodes(record)) continue;
+        if (record.target instanceof Element && record.target.closest(OWN_CLASSES)) continue;
         if (!stateTouched && stateRecordRelevant(record)) stateTouched = true;
         if (record.type === 'characterData') {
           const parent = record.target.parentElement;
@@ -1175,6 +1248,7 @@
   }
 
   function onContextMenu(event) {
+    if (!alive()) return;
     if (pickMode) return;
     if (state.settings.contextMenuEnabled === false) return;
     if (event.target.closest('.entag-menu')) return;
@@ -1188,6 +1262,7 @@
   }
 
   function onBadgeClick(event) {
+    if (!alive()) return;
     const badge = event.target.closest('.entag-badge, .entag-alias');
     if (!badge) return;
     event.preventDefault();
@@ -1217,6 +1292,7 @@
   }
 
   async function onPickClick(event) {
+    if (!alive()) return;
     if (!pickMode) return;
     event.preventDefault();
     event.stopPropagation();
@@ -1269,17 +1345,18 @@
   /* ------------------------------------------------------------------ */
 
   function onKeyDown(event) {
-    if (event.key !== 'Escape') return;
+    if (!alive() || event.key !== 'Escape') return;
     if (pickMode) setPickMode(false);
     if (menu && !menu.hidden) closeMenu();
   }
 
   function onDocumentPointerDown(event) {
+    if (!alive()) return;
     if (menu && !menu.hidden && !event.target.closest('.entag-menu')) closeMenu();
   }
 
-  api.storage.onChanged.addListener((changes, area) => {
-    if (area !== 'local') return;
+  function onStorageChanged(changes, area) {
+    if (area !== 'local' || !alive()) return;
     /* L'historique des pseudos vus (clé « seen ») change souvent : il ne
        déclenche aucun rebalayage de la page. */
     let rescan = false;
@@ -1300,10 +1377,10 @@
       rescan = true;
     }
     if (rescan) scheduleFullScan();
-  });
+  }
 
-  api.runtime.onMessage.addListener((message) => {
-    if (!message || typeof message.type !== 'string') return undefined;
+  function onRuntimeMessage(message) {
+    if (!alive() || !message || typeof message.type !== 'string') return undefined;
     if (message.type === 'entag:ping') {
       return Promise.resolve({ ok: true, tagged: Object.keys(state.tags).length });
     }
@@ -1320,28 +1397,86 @@
       return Promise.resolve({ ok: true });
     }
     return undefined;
-  });
+  }
+
+  function onWindowScroll() {
+    if (!alive()) return;
+    closeMenu();
+    scheduleChipUpdate();
+  }
+
+  function onWindowResize() {
+    if (alive()) scheduleChipUpdate();
+  }
+
+  function onPageHide() {
+    void flushSeen();
+  }
+
+  api.storage.onChanged.addListener(onStorageChanged);
+  api.runtime.onMessage.addListener(onRuntimeMessage);
+
+  /* Un autre exemplaire du script a pris la main : on se met en veille. */
+  function alive() {
+    if (shutDown) return false;
+    if (document.documentElement.getAttribute('data-entag-instance') === instanceId) return true;
+    shutdownInstance();
+    return false;
+  }
+
+  function shutdownInstance() {
+    if (shutDown) return;
+    shutDown = true;
+    if (observer) observer.disconnect();
+    clearTimeout(whisperTimer);
+    clearTimeout(seenTimer);
+    document.removeEventListener('contextmenu', onContextMenu, true);
+    document.removeEventListener('click', onBadgeClick, true);
+    document.removeEventListener('click', onPickClick, true);
+    document.removeEventListener('mousedown', onDocumentPointerDown, true);
+    document.removeEventListener('keydown', onKeyDown, true);
+    window.removeEventListener('scroll', onWindowScroll, true);
+    window.removeEventListener('resize', onWindowResize);
+    window.removeEventListener('pagehide', onPageHide);
+    try {
+      api.storage.onChanged.removeListener(onStorageChanged);
+      api.runtime.onMessage.removeListener(onRuntimeMessage);
+    } catch (err) {
+      /* contexte déjà invalidé */
+    }
+  }
+
+  /* Restes d'une version précédente : quand on recharge l'extension sans recharger
+     l'onglet, Firefox laisse dans la page les éléments ajoutés par l'ancienne version
+     (boutons « Whisp masqués » fantômes, pastilles, attributs). On repart d'une page propre. */
+  function cleanupLeftovers() {
+    document.querySelectorAll(OWN_CLASSES).forEach((node) => node.remove());
+    ['data-entag-hidden', 'data-entag-unread', 'data-entag-top', 'data-entag-order', 'data-entag-sorted',
+      'data-entag-whispered', 'data-entag-nick'].forEach((name) => {
+      document.querySelectorAll('[' + name + ']').forEach((node) => node.removeAttribute(name));
+    });
+    document.querySelectorAll('.entag-nick').forEach((node) => node.classList.remove('entag-nick'));
+  }
 
   async function init() {
     state = await S.loadAll();
     const seen = await S.loadSeen();
+    if (!alive()) return;
     Object.keys(seen).forEach((key) => {
       const info = seen[key] || {};
       seenKnown.set(key, { nick: info.nick || key, age: info.age || null, city: info.city || null, sent: info.last || 0 });
     });
     buildSelector();
+    cleanupLeftovers();
     ready = true;
     document.addEventListener('contextmenu', onContextMenu, true);
     document.addEventListener('click', onBadgeClick, true);
     document.addEventListener('click', onPickClick, true);
     document.addEventListener('mousedown', onDocumentPointerDown, true);
     document.addEventListener('keydown', onKeyDown, true);
-    window.addEventListener('scroll', () => {
-      closeMenu();
-      scheduleChipUpdate();
-    }, true);
-    window.addEventListener('resize', scheduleChipUpdate);
-    window.addEventListener('pagehide', () => { void flushSeen(); });
+    window.addEventListener('scroll', onWindowScroll, true);
+    window.addEventListener('resize', onWindowResize);
+    window.addEventListener('pagehide', onPageHide);
     startObserver();
     scan(document.body);
   }
