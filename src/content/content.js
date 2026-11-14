@@ -40,6 +40,8 @@
   const UNREAD_CLASS_RE = /unread|highlight|activity|notif|alert|mention|blink|flash/i;
   const CURRENT_CLASS_RE = /(?:^|[\s_-])(?:active|selected|current)(?:$|[\s_-])/i;
   const SEEN_FLUSH_MS = 8000;
+  const WHISPER_REFRESH_MS = 150;  /* regroupe les changements de la barre de gauche */
+  const CHIP_REFRESH_MS = 200;     /* idem pour la position du bouton de filtre */
   const SEEN_REFRESH_MS = 10 * 60 * 1000;
 
   let state = { tags: {}, settings: Object.assign({}, S.DEFAULT_SETTINGS), aliasIgnore: {} };
@@ -57,6 +59,15 @@
   let seenTimer = 0;
   const aliasCache = new Map();
   const profileCache = new WeakMap();
+  /* Éléments de pseudo par pseudo (minuscules) : sert à ne redécorer que ceux
+     dont l'état change, au lieu de rebalayer toute la page. */
+  const nickEls = new Map();
+  /* Entrées de la barre de gauche (une par conversation) et leurs conteneurs. */
+  let entrySet = new Set();
+  let listParents = new Set();
+  let structureEpoch = 0;
+  const entryCache = new WeakMap();
+  let whisperTimer = 0;
 
   /* ------------------------------------------------------------------ */
   /* Sélecteurs                                                          */
@@ -249,6 +260,30 @@
     if (!flag) attachOwn(el, node);
   }
 
+  function trackEl(key, el) {
+    let set = nickEls.get(key);
+    if (!set) {
+      set = new Set();
+      nickEls.set(key, set);
+    }
+    if (set.has(el)) return;
+    set.add(el);
+    if (set.size > 20) set.forEach((node) => { if (!node.isConnected) set.delete(node); });
+  }
+
+  /* Redécore uniquement les éléments des pseudos dont l'état whisp / non lu a changé. */
+  function rescanNicks(keys) {
+    keys.forEach((key) => {
+      const set = nickEls.get(key);
+      if (!set) return;
+      set.forEach((node) => {
+        if (node.isConnected) decorate(node);
+        else set.delete(node);
+      });
+    });
+    scheduleChipUpdate();
+  }
+
   function decorate(el) {
     if (!el || !el.isConnected) return;
     if (el.closest(OWN_CLASSES)) return;
@@ -281,6 +316,7 @@
 
     el.dataset.entagNick = nick;
     if (!el.classList.contains('entag-nick')) el.classList.add('entag-nick');
+    trackEl(nick.toLowerCase(), el);
 
     const zone = zoneOf(el);
     const target = isWhisperTarget(el, nick, zone);
@@ -552,7 +588,7 @@
   function scheduleChipUpdate() {
     if (chipScheduled) return;
     chipScheduled = true;
-    requestAnimationFrame(updateFilterChip);
+    setTimeout(updateFilterChip, CHIP_REFRESH_MS);
   }
 
   async function toggleHideWhispered() {
@@ -607,6 +643,8 @@
   function updateFilterChip() {
     chipScheduled = false;
     if (!document.body) return;
+    /* Aucun pseudo concerné et pas de bouton à cacher : rien à mesurer. */
+    if (!filterChip && !document.querySelector(FLAGGED)) return;
 
     if (!listAnchor || !listAnchor.isConnected || !listAnchor.querySelector(FLAGGED)) {
       const found = findListAnchor();
@@ -645,16 +683,29 @@
   /* Conversations privées ouvertes (rubrique MESSAGES, à gauche)         */
   /* ------------------------------------------------------------------ */
 
-  /* Entrée de la barre de gauche qui correspond à ce pseudo (conversation). */
-  function entryOf(el) {
-    const row = rowOf(el, false);
-    if (row) return row;
+  /* Entrée de la barre de gauche (conversation) d'un pseudo : le plus grand
+     ancêtre (6 niveaux au plus) qui ne contient aucun autre pseudo ni salon.
+     `others` = tous les éléments pseudo / salon de la barre. */
+  function entryFor(el, others) {
+    const cached = entryCache.get(el);
+    if (cached && cached.epoch === structureEpoch && cached.entry.isConnected && cached.entry.contains(el)) {
+      return cached.entry;
+    }
     let node = el;
-    for (let i = 0; i < 2 && node.parentElement; i += 1) {
+    for (let i = 0; i < 6; i += 1) {
       const parent = node.parentElement;
-      if (parent === document.body || containsChannel(parent) || countNicks(parent, 2) > 1) break;
+      if (!parent || parent === document.body || ROW_STOP_TAGS.test(parent.tagName)) break;
+      let shared = false;
+      for (const other of others) {
+        if (other !== el && parent.contains(other)) {
+          shared = true;
+          break;
+        }
+      }
+      if (shared) break;
       node = parent;
     }
+    entryCache.set(el, { entry: node, epoch: structureEpoch });
     return node;
   }
 
@@ -706,9 +757,17 @@
   function collectWhisperState() {
     const nicks = new Set();
     const unread = new Map();
-    if (!selector) return { nicks, unread };
+    const entries = new Set();
+    const parents = new Set();
+    if (!selector) return { nicks, unread, entries, parents };
+
+    /* Une seule recherche par bloc de premier niveau (les blocs imbriqués
+       portent aussi « statebrowser » dans leur classe). */
+    const found = [];
+    const others = [];
     document.querySelectorAll(STATE_SCOPE).forEach((box) => {
       if (box.closest(OWN_CLASSES)) return;
+      if (box.parentElement && box.parentElement.closest(STATE_SCOPE)) return;
       let list;
       try {
         list = box.querySelectorAll(selector);
@@ -716,41 +775,51 @@
         return;
       }
       list.forEach((el) => {
-        if (el.closest(OWN_CLASSES) || looksLikeChannel(el) || el.querySelector(selector)) return;
+        if (el.closest(OWN_CLASSES) || el.querySelector(selector)) return;
+        if (looksLikeChannel(el)) {
+          others.push(el);
+          return;
+        }
         const nick = extractNick(el);
         if (!isValidNick(nick)) return;
-        const key = nick.toLowerCase();
-        nicks.add(key);
-        const count = unreadOf(el, entryOf(el));
-        if (count > 0) unread.set(key, Math.max(count, unread.get(key) || 0));
+        found.push({ el, key: nick.toLowerCase() });
+        others.push(el);
       });
     });
-    return { nicks, unread };
+
+    found.forEach(({ el, key }) => {
+      nicks.add(key);
+      const entry = entryFor(el, others);
+      entries.add(entry);
+      if (entry.parentElement) parents.add(entry.parentElement);
+      const count = unreadOf(el, entry);
+      if (count > 0) unread.set(key, Math.max(count, unread.get(key) || 0));
+    });
+    return { nicks, unread, entries, parents };
   }
 
-  /* Recalcule conversations ouvertes et non lues ; renvoie true si quelque chose a changé. */
+  /* Recalcule conversations ouvertes et non lues ; renvoie les pseudos dont l'état a changé. */
   function refreshWhisper() {
     const next = collectWhisperState();
-    let changed = next.nicks.size !== whisperNicks.size || next.unread.size !== whisperUnread.size;
-    if (!changed) {
-      for (const nick of next.nicks) {
-        if (!whisperNicks.has(nick)) {
-          changed = true;
-          break;
-        }
-      }
-    }
-    if (!changed) {
-      for (const [nick, count] of next.unread) {
-        if (whisperUnread.get(nick) !== count) {
-          changed = true;
-          break;
-        }
-      }
-    }
+    const changed = new Set();
+    whisperNicks.forEach((key) => { if (!next.nicks.has(key)) changed.add(key); });
+    next.nicks.forEach((key) => { if (!whisperNicks.has(key)) changed.add(key); });
+    whisperUnread.forEach((count, key) => { if (next.unread.get(key) !== count) changed.add(key); });
+    next.unread.forEach((count, key) => { if (whisperUnread.get(key) !== count) changed.add(key); });
     whisperNicks = next.nicks;
     whisperUnread = next.unread;
-    return changed;
+    entrySet = next.entries;
+    listParents = next.parents;
+    return Array.from(changed);
+  }
+
+  function scheduleWhisperRefresh() {
+    if (whisperTimer) return;
+    whisperTimer = setTimeout(() => {
+      whisperTimer = 0;
+      const changed = refreshWhisper();
+      if (changed.length) rescanNicks(changed);
+    }, WHISPER_REFRESH_MS);
   }
 
   function scan(root) {
@@ -797,14 +866,39 @@
     return nodes.length > 0 && nodes.every(isOurNode);
   }
 
-  /* La mutation touche-t-elle la barre de gauche (conversations privées) ? */
-  function touchesState(record) {
+  /* La mutation concerne-t-elle une conversation de la barre de gauche ?
+     (contenu d'une entrée, ou entrée ajoutée / retirée). Un lecteur audio ou
+     tout autre élément de la barre qui bouge sans cesse est ignoré. */
+  function stateRecordRelevant(record) {
     const target = record.target instanceof Element ? record.target : record.target.parentElement;
-    if (target && target.closest(STATE_SCOPE)) return true;
-    if (record.type !== 'childList') return false;
-    const nodes = Array.from(record.addedNodes).concat(Array.from(record.removedNodes));
-    return nodes.some((n) => n.nodeType === Node.ELEMENT_NODE &&
-      (n.matches(STATE_SCOPE) || n.querySelector(STATE_SCOPE)));
+    if (!target) return false;
+    const inScope = target.closest(STATE_SCOPE);
+    const nodes = record.type === 'childList'
+      ? Array.from(record.addedNodes).concat(Array.from(record.removedNodes))
+      : [];
+    const elements = nodes.filter((n) => n.nodeType === Node.ELEMENT_NODE && !isOurNode(n));
+
+    if (record.type === 'childList' && elements.length) {
+      const addsBox = elements.some((n) => n.matches(STATE_SCOPE) || n.querySelector(STATE_SCOPE));
+      if (!inScope && !addsBox) return false;
+      if (elements.some((n) => entrySet.has(n))) {
+        structureEpoch += 1;
+        return true;
+      }
+      try {
+        if (elements.some((n) => n.matches(selector) || n.querySelector(selector))) {
+          structureEpoch += 1;
+          return true;
+        }
+      } catch (err) {
+        return false;
+      }
+    }
+    if (!inScope || !entrySet.size) return Boolean(inScope);
+    for (let node = target; node && node !== document.body; node = node.parentElement) {
+      if (entrySet.has(node)) return true;
+    }
+    return false;
   }
 
   function startObserver() {
@@ -817,13 +911,13 @@
            conversation passe en « non lue »). */
         if (record.type === 'attributes') {
           const t = record.target;
-          if (!stateTouched && t instanceof Element && !t.closest(OWN_CLASSES) && t.closest(STATE_SCOPE)) {
+          if (!stateTouched && t instanceof Element && !t.closest(OWN_CLASSES) && stateRecordRelevant(record)) {
             stateTouched = true;
           }
           continue;
         }
         if (onlyOurNodes(record)) continue;
-        if (!stateTouched && touchesState(record)) stateTouched = true;
+        if (!stateTouched && stateRecordRelevant(record)) stateTouched = true;
         if (record.type === 'characterData') {
           const parent = record.target.parentElement;
           if (parent && !parent.closest(OWN_CLASSES)) roots.add(parent);
@@ -838,8 +932,9 @@
           roots.add(node);
         }
       }
-      /* Conversation privée ouverte ou fermée : on remet à jour les flags. */
-      if (stateTouched && refreshWhisper()) scheduleFullScan();
+      /* Conversation privée ouverte, fermée ou devenue non lue : mise à jour
+         regroupée, limitée aux pseudos concernés. */
+      if (stateTouched) scheduleWhisperRefresh();
       if (!roots.size) return;
       scheduleChipUpdate();
       if (roots.size > 40) {

@@ -88,6 +88,14 @@ zip -r -FS ../europnet-tags.zip . -x '*.git*' 'test/*'
 | Voir / gérer tous les tags | Icône de l'extension dans la barre d'outils |
 | Sauvegarder la liste | Popup → « Exporter » (fichier JSON) |
 
+## Performances
+
+`node test/bench.mjs` charge une page lourde (800 chatteurs, 60 conversations, 400 messages)
+avec de l'activité continue et mesure le temps passé dans les scripts : l'extension doit rester
+de l'ordre de la centaine de millisecondes sur 6 secondes. Les changements de la barre de gauche
+sont regroupés (150 ms) et ne redécorent que les pseudos concernés ; le glow est fixe, sans
+animation sur les lignes.
+
 ## Données et vie privée
 
 Tout reste dans le navigateur (`storage.local`) ; rien n'est envoyé ailleurs. Pour la

@@ -84,20 +84,14 @@
   border-color: #3b82f6 transparent transparent transparent !important;
 }
 
-/* Message privé non lu : glow bleu sur la ligne + remontée en haut de la liste. */
+/* Message privé non lu : glow bleu fixe sur la ligne + remontée en haut de la liste.
+   Volontairement sans animation sur les lignes : une ombre animée sur beaucoup de
+   lignes repeint la page sans arrêt et fait ramer le site. Le mouvement est réservé
+   à la petite bulle (transformation, peu coûteuse). */
 [data-entag-unread] {
   background-color: rgba(59, 130, 246, .16) !important;
   border-radius: 6px;
-  animation: entag-glow 1.6s ease-in-out infinite;
-}
-
-@keyframes entag-glow {
-  0%, 100% { box-shadow: 0 0 0 1px rgba(59, 130, 246, .45), 0 0 6px 1px rgba(59, 130, 246, .35); }
-  50%      { box-shadow: 0 0 0 1px rgba(96, 165, 250, .95), 0 0 16px 4px rgba(59, 130, 246, .8); }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  [data-entag-unread] { animation: none; box-shadow: 0 0 0 2px rgba(59, 130, 246, .8); }
+  box-shadow: 0 0 0 1px rgba(96, 165, 250, .85), 0 0 12px 3px rgba(59, 130, 246, .6);
 }
 
 /* `order` ne s'applique que dans un conteneur flex / grille : un conteneur « block »
