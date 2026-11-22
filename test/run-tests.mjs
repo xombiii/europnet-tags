@@ -723,6 +723,40 @@ await page.waitForTimeout(500);
 check('doublons : un clic sur le bouton bascule bien le filtre (pas deux fois)',
   (await page.locator('#chatters .row').evaluateAll((rows) => rows.filter((r) => getComputedStyle(r).display === 'none').length)) === 3);
 
+/* 15. Filtre actif : la barre de saisie, l'en-tête et les fiches ne sont JAMAIS masqués ---- */
+for (const query of ['', '?nick=MagicWand']) {
+  const label = query ? 'avec ?nick= dans l\'adresse' : 'pseudo lu près de la zone de saisie';
+  await page.goto(pathToFileURL(join(here, 'fixture-composer.html')).href + query);
+  await page.evaluate(() => { globalThis.__entagStore.settings = { hideWhispered: true }; });
+  await inject();
+  await page.waitForTimeout(700);
+  const ui = await page.evaluate(() => {
+    const shown = (el) => getComputedStyle(el).display !== 'none' && !el.closest('[data-entag-hidden]');
+    return {
+      composer: shown(document.getElementById('composer')),
+      editor: shown(document.getElementById('editor')),
+      header: shown(document.getElementById('conv-header')),
+      profile: shown(document.getElementById('profile-card')),
+      userCard: shown(document.querySelector('.kiwi-statebrowser-user')),
+      hiddenTypes: Array.from(document.querySelectorAll('[data-entag-hidden]')).map((e) => e.classList.contains('row') ? 'row' : (e.id || e.className)),
+      hiddenNicks: Array.from(document.querySelectorAll('#chatters .row')).filter((r) => getComputedStyle(r).display === 'none')
+        .map((r) => r.querySelector('.cell-username').textContent),
+      ownFlags: document.querySelectorAll('.kiwi-controlinput .entag-whisper, .kiwi-statebrowser-user .entag-whisper').length
+    };
+  });
+  check('filtre actif (' + label + ') : la barre de saisie et la zone d\'écriture restent visibles',
+    ui.composer && ui.editor, ui);
+  check('filtre actif (' + label + ') : l\'en-tête de conversation, la fiche de profil et ta fiche restent visibles',
+    ui.header && ui.profile && ui.userCard, ui);
+  check('filtre actif (' + label + ') : seules les 3 lignes de la liste sont masquées',
+    ui.hiddenTypes.join() === 'row,row,row' && ui.hiddenNicks.join() === 'Soraka,anais-24,_petitebrune', ui);
+  check('filtre actif (' + label + ') : ton propre pseudo n\'est pas marqué comme une conversation', ui.ownFlags === 0, ui);
+  await page.locator('#editor').click();
+  await page.keyboard.type('coucou');
+  check('filtre actif (' + label + ') : on peut toujours écrire un message',
+    (await page.evaluate(() => document.getElementById('editor').textContent)).includes('coucou'));
+}
+
 await browser.close();
 
 const failed = results.filter((r) => !r.ok);

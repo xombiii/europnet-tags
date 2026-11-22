@@ -47,6 +47,9 @@
   const A = globalThis.ENAlias;
   /* Ordre des repères collés à la fin d'un pseudo. */
   const OWN_ORDER = ['entag-badge', 'entag-alias', 'entag-whisper'];
+  /* Zone de saisie : champ, zone modifiable, ou rôle « textbox ». */
+  const EDITABLE = 'textarea, input:not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="submit"]), ' +
+    '[contenteditable]:not([contenteditable="false"]), [role="textbox"]';
   /* Signaux d'une conversation non lue dans la barre de gauche. */
   const UNREAD_CLASS_RE = /unread|highlight|activity|notif|alert|mention|blink|flash/i;
   const CURRENT_CLASS_RE = /(?:^|[\s_-])(?:active|selected|current)(?:$|[\s_-])/i;
@@ -62,6 +65,8 @@
   let scanScheduled = false;
   let pickMode = false;
   let whisperNicks = new Set();
+  /* Ton propre pseudo : jamais traité comme une conversation, jamais masqué. */
+  const ownNicks = new Set();
   /* Messages privés non lus : pseudo en minuscules → nombre (>= 1). */
   let whisperUnread = new Map();
   /* Historique des pseudos vus : clé → { nick, age, city, sent } */
@@ -251,8 +256,9 @@
   /* Le flag whisp apparaît sur tout pseudo hors du salon (liste des membres,
      recherche, fiche) dont une conversation privée est ouverte à gauche. */
   function isWhisperTarget(el, nick, zone) {
-    if (zone === 'message' || el.closest(STATE_SCOPE)) return false;
-    return whisperNicks.has(nick.toLowerCase());
+    const key = nick.toLowerCase();
+    if (zone === 'message' || ownNicks.has(key) || el.closest(STATE_SCOPE)) return false;
+    return whisperNicks.has(key);
   }
 
   function syncWhisperFlag(el, nick, flag, target, unread) {
@@ -524,13 +530,33 @@
       if (!parent || parent === document.body || ROW_STOP_TAGS.test(parent.tagName)) break;
       if (countNicks(parent, 2) > 1) break;
       if (containsChannel(parent)) break;
-      if (parent.querySelector('input, textarea, select')) break;
+      if (parent.querySelector(EDITABLE + ', select')) break;
       /* Une ligne reste de la hauteur d'un pseudo : au-delà, c'est un bloc. */
       if (base.height > 0 && parent.getBoundingClientRect().height > Math.max(60, base.height * 4)) break;
       row = parent;
     }
     const container = row.parentElement;
-    return container && countNicks(container, 2) > 1 ? row : null;
+    return container && countNicks(container, 2) > 1 && isListRow(row) ? row : null;
+  }
+
+  /* Une vraie ligne de liste a au moins une « sœur » du même type qui contient
+     elle aussi exactement un pseudo (liste de membres, de conversations). Un bloc
+     unique (barre de saisie, en-tête de conversation, fiche de profil) n'en a pas :
+     on ne le masque jamais. */
+  function isListRow(row) {
+    const box = row.parentElement;
+    if (!box) return false;
+    const mine = new Set(Array.from(row.classList).filter((c) => !c.startsWith('entag-')));
+    let similar = 0;
+    for (const sibling of box.children) {
+      if (sibling.tagName !== row.tagName) continue;
+      const theirs = Array.from(sibling.classList).filter((c) => !c.startsWith('entag-'));
+      if (mine.size ? !theirs.some((c) => mine.has(c)) : theirs.length) continue;
+      if (countNicks(sibling, 2) !== 1) continue;
+      similar += 1;
+      if (similar >= 2) return true;
+    }
+    return false;
   }
 
   function showRowOf(el) {
@@ -682,7 +708,11 @@
     if (target && !unread && state.settings.hideWhispered === true) {
       if (!el.closest('[data-entag-hidden]')) {
         const row = rowOf(el);
-        if (row) row.setAttribute('data-entag-hidden', '');
+        /* Dernier garde-fou : on ne masque jamais un bloc qui contient une zone de
+           saisie ou le champ actuellement actif. */
+        if (row && !row.querySelector(EDITABLE) && !row.contains(document.activeElement)) {
+          row.setAttribute('data-entag-hidden', '');
+        }
       }
     } else {
       showRowOf(el);
@@ -869,6 +899,44 @@
     return 0;
   }
 
+  /* Son propre pseudo : lu dans l'adresse (?nick=...) et près de toute zone de saisie
+     (la barre d'écriture du tchat l'affiche à côté du champ). Renvoie true s'il y a du nouveau. */
+  function refreshOwnNicks() {
+    const before = ownNicks.size;
+    try {
+      const fromUrl = new URLSearchParams(location.search).get('nick');
+      if (fromUrl && isValidNick(fromUrl)) ownNicks.add(fromUrl.toLowerCase());
+    } catch (err) {
+      /* adresse illisible */
+    }
+    if (selector) {
+      document.querySelectorAll(EDITABLE).forEach((input) => {
+        if (input.closest(OWN_CLASSES)) return;
+        let box = input;
+        for (let i = 0; i < 3 && box.parentElement && box.parentElement !== document.body; i += 1) {
+          box = box.parentElement;
+          const found = new Set();
+          let list;
+          try {
+            list = box.querySelectorAll(selector);
+          } catch (err) {
+            return;
+          }
+          list.forEach((node) => {
+            if (node.closest(OWN_CLASSES) || node.querySelector(selector) || looksLikeChannel(node)) return;
+            const nick = extractNick(node);
+            if (isValidNick(nick)) found.add(nick.toLowerCase());
+          });
+          if (found.size && found.size <= 2) {
+            found.forEach((key) => ownNicks.add(key));
+            return;
+          }
+        }
+      });
+    }
+    return ownNicks.size !== before;
+  }
+
   function collectWhisperState() {
     const nicks = new Set();
     const unread = new Map();
@@ -898,8 +966,9 @@
         }
         const nick = extractNick(el);
         if (!isValidNick(nick)) return;
-        found.push({ el, key: nick.toLowerCase(), nick });
         others.push(el);
+        if (ownNicks.has(nick.toLowerCase())) return;
+        found.push({ el, key: nick.toLowerCase(), nick });
       });
     });
 
@@ -917,6 +986,7 @@
 
   /* Recalcule conversations ouvertes et non lues ; renvoie les pseudos dont l'état a changé. */
   function refreshWhisper() {
+    refreshOwnNicks();
     const next = collectWhisperState();
     const changed = new Set();
     whisperNicks.forEach((key) => { if (!next.nicks.has(key)) changed.add(key); });

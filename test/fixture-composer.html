@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <title>Fixture — barre de saisie, fiche utilisateur et en-tête de conversation</title>
+  <style>
+    body { margin: 0; display: flex; height: 100vh; font: 13px system-ui, sans-serif; }
+    .kiwi-statebrowser { width: 220px; display: flex; flex-direction: column; background: #0f4c81; color: #e6f0fa; }
+    .kiwi-statebrowser-list { flex: 1; overflow: auto; padding: 8px; }
+    .kiwi-statebrowser-channel { padding: 3px 0; }
+    .kiwi-statebrowser-user { padding: 8px; border-top: 1px solid #1d6aa8; }
+    .stage { flex: 1; display: flex; flex-direction: column; }
+    .conv-header { padding: 8px 12px; background: #dbeafe; }
+    .kiwi-messagelist { flex: 1; overflow: auto; padding: 8px 12px; }
+    .kiwi-messagelist-message { margin-bottom: 6px; }
+    .kiwi-messagelist-nick { font-weight: 600; color: #2563eb; }
+    /* barre de saisie : pseudo + zone d'écriture (contenteditable, pas un <input>) */
+    .kiwi-controlinput { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: #ffffff; border-top: 1px solid #cbd5e1; height: 40px; box-sizing: border-box; }
+    .kiwi-controlinput-user { font-weight: 600; }
+    .kiwi-controlinput-editor { flex: 1; min-height: 20px; border: 1px solid #cbd5e1; border-radius: 6px; padding: 4px 8px; }
+    .side { width: 300px; background: #eef2f7; display: flex; flex-direction: column; }
+    .scroller { flex: 1; overflow: auto; padding: 4px 10px; }
+    .row { display: flex; gap: 10px; padding: 2px 0; }
+    .cell-username { width: 150px; font-weight: 600; color: #db2777; }
+    .profile-card { padding: 10px; background: #fff; border-top: 1px solid #cbd5e1; }
+  </style>
+</head>
+<body>
+  <nav class="kiwi-statebrowser">
+    <div class="kiwi-statebrowser-list">
+      <h3>Messages</h3>
+      <div class="kiwi-statebrowser-channel"><span class="kiwi-statebrowser-channel-name">Soraka</span></div>
+      <div class="kiwi-statebrowser-channel"><span class="kiwi-statebrowser-channel-name">anais-24</span></div>
+      <div class="kiwi-statebrowser-channel"><span class="kiwi-statebrowser-channel-name">_petitebrune</span></div>
+    </div>
+    <div class="kiwi-statebrowser-user"><span class="kiwi-statebrowser-user-nick">MagicWand</span> <small>Online</small></div>
+  </nav>
+
+  <main class="stage">
+    <div class="conv-header" id="conv-header"><span class="conv-header-nick">Soraka</span></div>
+    <div class="kiwi-messagelist" id="messages">
+      <div class="kiwi-messagelist-message"><span class="kiwi-messagelist-nick">Soraka</span> bonsoir</div>
+      <div class="kiwi-messagelist-message"><span class="kiwi-messagelist-nick">MagicWand</span> salut</div>
+    </div>
+    <div class="kiwi-controlinput" id="composer">
+      <div class="kiwi-controlinput-user"><span class="kiwi-controlinput-user-nick">MagicWand</span></div>
+      <div class="kiwi-controlinput-editor" contenteditable="true" id="editor">Send a message...</div>
+    </div>
+  </main>
+
+  <aside class="side">
+    <div class="scroller" id="chatters">
+      <div class="row"><span class="cell-username">Signit</span><span>18</span></div>
+      <div class="row"><span class="cell-username">Soraka</span><span>21</span></div>
+      <div class="row"><span class="cell-username">Souestelle</span><span>24</span></div>
+      <div class="row"><span class="cell-username">anais-24</span><span>24</span></div>
+      <div class="row"><span class="cell-username">_petitebrune</span><span>24</span></div>
+      <div class="row"><span class="cell-username">leakitty</span><span>18</span></div>
+    </div>
+    <div class="profile-card" id="profile-card"><span class="profile-card-username">Soraka</span> <button type="button">Bloquer</button></div>
+  </aside>
+</body>
+</html>

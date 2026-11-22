@@ -22,7 +22,9 @@ localement dans le navigateur.
   masque de la liste tous les pseudos avec qui une conversation privée est déjà
   ouverte (la ligne entière disparaît), un second clic les réaffiche. Le compteur
   suit les ouvertures / fermetures de conversations ; le choix est mémorisé et
-  réglable aussi dans les options.
+  réglable aussi dans les options. Le filtre ne masque que des **lignes d'une vraie liste** (un
+  bloc isolé comme la barre d'écriture, l'en-tête d'une conversation ou une fiche de profil n'est
+  jamais touché), jamais ton propre pseudo, et jamais un bloc qui contient une zone de saisie.
 - **Messages privés non lus** : dans la barre de gauche, la conversation qui contient des
   messages non lus **brille en bleu**, et un petit panneau **« Non lus (N) »** est épinglé en
   haut de la zone qui défile (nom, couleur du tag, nombre de messages) : un clic ouvre la
@@ -151,7 +153,7 @@ l'exclusion des salons (`#BDSM`), l'affichage des pastilles dans les trois zones
 l'absence de doublons, la prise en compte des nouveaux messages, le menu du clic
 droit, l'enregistrement des tags et notes, le flag « whisp » (ouverture et fermeture
 d'une conversation privée, ordre pastille / flag, réglage), le filtre qui masque
-les lignes de la liste (bouton, compteur, réglage des options), le score d'alias
+les lignes de la liste (bouton, compteur, réglage des options ; barre de saisie, en-tête et fiches jamais masqués), le score d'alias
 (cas typiques, faux positifs évités, historique, panneau du popup, « Ce n'est pas lui »),
 les messages non lus dans la barre de gauche (compteur, classe, sélecteur personnalisé,
 conversation ouverte, glow, panneau « Non lus » épinglé même liste défilée, clic qui ouvre la

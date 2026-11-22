@@ -6,6 +6,7 @@
  *   node test/bench.mjs                 mesure l'extension de ce dépôt
  *   node test/bench.mjs none            mesure la page seule (référence)
  *   NOUNREAD=1 node test/bench.mjs      sans les bascules « non lu »
+ *   HIDE=1 node test/bench.mjs          avec le filtre « masquer les whisp » actif
  *
  * Repère : « ScriptDuration » = temps passé dans les scripts (extension comprise) sur 6 s ;
  * il doit rester de l'ordre de 100 ms.
@@ -46,7 +47,7 @@ body{margin:0;display:flex;height:100vh;font:13px sans-serif}
 </div></aside></body></html>`;
 
 const MOCK = `(()=>{const l=[];const clone=v=>v===undefined?undefined:JSON.parse(JSON.stringify(v));
-const d={tags:{},settings:{}};
+const d={tags:{},settings:{${process.env.HIDE ? 'hideWhispered:true' : ''}}};
 for(let i=0;i<30;i++){const n='user'+(i*7919%10007).toString(36)+'_'+(18+i%40);d.tags[n.toLowerCase()]={nick:n,tag:['green','yellow','red'][i%3],note:'',updatedAt:1};}
 globalThis.__entagStore=d;globalThis.browser={storage:{local:{async get(x){const o={};for(const k of Object.keys(x||d))o[k]=d[k]===undefined?x[k]:clone(d[k]);return o},async set(p){const c={};for(const [k,v] of Object.entries(p)){c[k]={newValue:v};d[k]=clone(v)}l.forEach(f=>f(c,'local'))}},onChanged:{addListener:f=>l.push(f)}},runtime:{onMessage:{addListener(){}}}}})();`;
 
